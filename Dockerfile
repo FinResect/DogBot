@@ -10,10 +10,16 @@ ENV GZ_VERSION=harmonic
 
 # 切换至 root 进行安装
 USER root
-# RUN sed -i 's/archive.ubuntu.com/mirrors.tuna.tsinghua.edu.cn/g' /etc/apt/sources.list &&\
-#     sed -i 's/security.ubuntu.com/mirrors.tuna.tsinghua.edu.cn/g' /etc/apt/sources.list &&\
-#     find /etc/apt/sources.list.d/ -type f -name "*.list" -exec sed -i 's|http://packages.ros.org/ros2/ubuntu|https://mirrors.tuna.tsinghua.edu.cn/ros2/ubuntu|g' {} +
-
+USER root
+# 同时尝试修改 sources.list 和新的 ubuntu.sources
+RUN if [ -f /etc/apt/sources.list.d/ubuntu.sources ]; then \
+        sed -i 's/archive.ubuntu.com/mirrors.tuna.tsinghua.edu.cn/g' /etc/apt/sources.list.d/ubuntu.sources && \
+        sed -i 's/security.ubuntu.com/mirrors.tuna.tsinghua.edu.cn/g' /etc/apt/sources.list.d/ubuntu.sources; \
+    fi && \
+    if [ -f /etc/apt/sources.list ]; then \
+        sed -i 's/archive.ubuntu.com/mirrors.tuna.tsinghua.edu.cn/g' /etc/apt/sources.list && \
+        sed -i 's/security.ubuntu.com/mirrors.tuna.tsinghua.edu.cn/g' /etc/apt/sources.list; \
+    fi
 # 安装常用工具和 ROS 2 编译工具
 RUN apt-get update && apt-get install -y \
     python3-colcon-common-extensions \
@@ -54,7 +60,9 @@ RUN apt-get update && apt-get install -y \
 #     && rm -rf /var/lib/apt/lists/*
 
 # Install oh my zsh, change theme to af-magic and setup environment of zsh
-RUN if [ ! -d "$HOME/.oh-my-zsh" ]; then \
+RUN git config --global http.postBuffer 524288000 && \
+    git config --global core.compression 0 && \
+    if [ ! -d "$HOME/.oh-my-zsh" ]; then \
     sh -c "$(wget https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh -O -)" "" --unattended; \
     fi && \
     sed -i 's/ZSH_THEME=\"[a-z0-9\-]*\"/ZSH_THEME="af-magic"/g' ~/.zshrc && \

@@ -1,0 +1,3 @@
+#!/bin/bash
+
+gz service -s /world/empty/create --reqtype gz.msgs.EntityFactory --reptype gz.msgs.Boolean --timeout 1000 --req 'sdf_filename: "/workspaces/DogBot/go2_description/urdf/go2_description.urdf", name: "go2_urdf_model"'

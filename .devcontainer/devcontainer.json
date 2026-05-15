@@ -62,7 +62,6 @@
 				"streetsidesoftware.code-spell-checker",
 				// Git enhancements
 				"mhutchie.git-graph",
-				"redhat.vscode-xml"
 			]
 		}
 	},
