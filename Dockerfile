@@ -41,6 +41,10 @@ RUN apt-get update && apt-get install -y \
     ros-humble-gz-ros2-control \
     ros-humble-robot-state-publisher \
     ros-humble-joint-state-publisher \
+    ros-humble-joint-state-publisher-gui \
+    ros-humble-navigation2 \
+    ros-humble-nav2-bringup \
+    ros-humble-nav2-common \
     ros-humble-xacro \
     && rm -rf /var/lib/apt/lists/*
 
@@ -65,5 +69,7 @@ ENV PATH="/workspaces/DogBot/.script:${PATH}"
 
 # 5. 创建 XDG_RUNTIME_DIR 并赋予正确权限，解决 vscode-git.sock 无法创建的问题
 RUN mkdir -p /tmp/runtime-root && chmod 700 /tmp/runtime-root
+# 设置环境变量，确保 ROS 2 Launch 能正确读取并走 get_package_share_directory 分支
+ENV need_compile=True
 
 CMD ["/entrypoint"]

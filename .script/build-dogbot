@@ -1,13 +1,10 @@
 #!/bin/bash
 
-if [[ ! -d "/workspaces/DogBot/dogbot_ws" ]]; then
-    echo "> ERROR: Workspace not found: /workspaces/DogBot/dogbot_ws"
+if [[ ! -d "/workspaces/DogBot/ros2_ws" ]]; then
+    echo "> ERROR: Workspace not found: /workspaces/DogBot/ros2_ws"
     exit 1
 fi
 
-cd "/workspaces/DogBot/dogbot_ws" || exit 1
+cd "/workspaces/DogBot/ros2_ws" || exit 1
 
 colcon build --symlink-install
-
-# 4. 加载环境
-source install/setup.bash

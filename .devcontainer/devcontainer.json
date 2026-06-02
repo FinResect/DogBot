@@ -1,74 +1,52 @@
-// For format details, see https://aka.ms/devcontainer.json. For config options, see the
-// README at: https://github.com/devcontainers/templates/tree/main/src/docker-existing-dockerfile
+// For format details, see https://aka.ms/devcontainer.json.
 {
-	"name": "Dogbot-develop",
-	"build": {
-		// Sets the run context to one level up instead of the .devcontainer folder.
-		"context": "..",
-		// Update the 'dockerFile' property if you aren't using the standard 'Dockerfile' filename.
-		"dockerfile": "../Dockerfile"
-	},
-	"initializeCommand": "xhost +local:root",
-	"mounts": [
-        // 挂载到 /tmp 下作为临时参考文件
+    "name": "Dogbot-develop",
+    "build": {
+        "context": "..",
+        "dockerfile": "../Dockerfile"
+    },
+    "privileged": true,
+
+    // 1. 主机与硬件透传配置 (GPU、GUI图形界面、网络共享)
+    "initializeCommand": "xhost +local:root",
+    "runArgs": [
+        "--net=host",                           // 必须：共享主机网络，确保 ROS 2 节点发现机制正常
+        "--ipc=host",                           // 必须：提升节点间共享内存大数据传输效率
+        "--gpus=all",                           // 必须：透传 NVIDIA 显卡用于仿真
+        "--privileged",                         // 给予更高权限访问串口、主板等底层硬件
+        "-e", "DISPLAY=${localEnv:DISPLAY}",    // 转发显示器信号以运行 RViz/Gazebo
+        "-e", "NVIDIA_DRIVER_CAPABILITIES=all",
+        "-e", "NVIDIA_VISIBLE_DEVICES=all",
+        "-v", "/tmp/.X11-unix:/tmp/.X11-unix:rw" // 挂载 X11 路径
+    ],
+    "containerEnv": {
+        "XDG_RUNTIME_DIR": "/tmp/runtime-root"
+    },
+
+    // 2. 外部配置挂载
+    "mounts": [
         "source=${localEnv:HOME}/.gitconfig,target=/tmp/.host_gitconfig,type=bind,ro"
     ],
-	"runArgs": [
-		"--net=host", // 必须：共享主机网络，确保 ROS 2 发现机制正常
-		"--ipc=host", // 必须：提升节点间大数据传输效率
-		"--gpus=all", // 必须：透传显卡
-		"--privileged", // 给予更高权限访问硬件
-		"-e",
-		"DISPLAY=${localEnv:DISPLAY}", // 转发显示器信号
-		"-e",
-		"NVIDIA_DRIVER_CAPABILITIES=all",
-		"-e",
-		"NVIDIA_VISIBLE_DEVICES=all",
-		"-v",
-		"/tmp/.X11-unix:/tmp/.X11-unix:rw" // 挂载 X11 路径以运行 RViz
-		// "--env=NVIDIA_DRIVER_CAPABILITIES=all",
-		// "--env=NVIDIA_VISIBLE_DEVICES=all",
-		// "--device=/dev/dri:/dev/dri"
-	],
-	"containerEnv": {
-		"XDG_RUNTIME_DIR": "/tmp/runtime-root"
-		// "NVIDIA_DRIVER_CAPABILITIES": "all",
-		// "LD_LIBRARY_PATH": "/usr/lib/x86_64-linux-gnu:/usr/lib/i386-linux-gnu:${env:LD_LIBRARY_PATH}"
-	},
-	"privileged": true,
-	// Features to add to the dev container. More info: https://containers.dev/features.
-	// "features": {
-	// 	"ghcr.io/devcontainers/features/nvidia-cuda:1": {
-	// 		"installCudnn": true
-	// 	}
-	// },
-	// Use 'forwardPorts' to make a list of ports inside the container available locally.
-	// "forwardPorts": [],
-	// Uncomment the next line to run commands after the container is created.
-	// "postCreateCommand": "cat /etc/os-release",
-	// Configure tool-specific properties.
-	"customizations": {
-		"vscode": {
-			"settings": {
-				// 设置容器内默认 Shell 为 zsh
-				"terminal.integrated.defaultProfile.linux": "zsh"
-			},
-			"extensions": [
-				// C++ language support
-				"llvm-vs-code-extensions.vscode-clangd",
-				// Python language support
-				"ms-python.vscode-pylance",
-				"ms-python.python",
-				"ms-python.debugpy",
-				// CMake language support
-				"twxs.cmake",
-				// Code spell checking
-				"streetsidesoftware.code-spell-checker",
-				// Git enhancements
-				"mhutchie.git-graph",
-			]
-		}
-	},
-	// Uncomment to connect as an existing user other than the container default. More info: https://aka.ms/dev-containers-non-root.
-	// "remoteUser": "devcontainer"
-	"postCreateCommand": "bash -c 'if [ -f /tmp/.host_gitconfig ]; then cp /tmp/.host_gitconfig /root/.gitconfig && chmod 644 /root/.gitconfig; fi && echo \"source /opt/ros/humble/setup.bash\" >> ~/.bashrc && (chmod +x /workspaces/DogBot/.script/* || true)'"}
+
+    // 3. 容器创建后的自动化初始化脚本 (自动同步Git配置、注入ROS环境、脚本赋权)
+    "postCreateCommand": "bash -c 'if [ -f /tmp/.host_gitconfig ]; then cp /tmp/.host_gitconfig /root/.gitconfig && chmod 644 /root/.gitconfig; fi && echo \"source /opt/ros/humble/setup.bash\" >> ~/.bashrc && echo \"source /opt/ros/humble/setup.zsh\" >> ~/.zshrc && (chmod +x /workspaces/DogBot/.script/* || true)'",
+
+    // 4. VS Code 专属开发环境定制
+    "customizations": {
+        "vscode": {
+            "settings": {
+                "terminal.integrated.defaultProfile.linux": "zsh" // 默认使用 zsh
+            },
+            "extensions": [
+                "llvm-vs-code-extensions.vscode-clangd", // C++ 语法与跳转支持
+                "ms-python.vscode-pylance",             // Python 代码分析
+                "ms-python.python",                     // Python 语言核心支持
+                "ms-python.debugpy",                    // Python 调试器
+                "twxs.cmake",                           // CMake 编译脚本支持
+                "streetsidesoftware.code-spell-checker", // 代码拼写检查
+                "mhutchie.git-graph",                    // Git 提交历史图谱化显示
+				"GitHub.copilot"
+            ]
+        }
+    }
+}

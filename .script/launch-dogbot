@@ -1,4 +1,6 @@
 #!/bin/bash
 
-cd /workspaces/DogBot/dogbot_ws/build
-./main
+cd /workspaces/DogBot/ros2_ws
+source install/setup.bash
+
+ros2 launch puppypi_description robot_description.launch.py
