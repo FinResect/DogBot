@@ -9,10 +9,10 @@
 		"dockerfile": "../Dockerfile"
 	},
 	"initializeCommand": "xhost +local:root",
-	"mounts": [
-    // 挂载宿主机的全局 gitconfig 到容器内当前用户的家目录下
-    "source=${localEnv:HOME}/.gitconfig,target=/root/.gitconfig,type=bind,ro"
-	],
+	// "mounts": [
+    // // 挂载宿主机的全局 gitconfig 到容器内当前用户的家目录下
+    // "source=${localEnv:HOME}/.gitconfig,target=/root/.gitconfig,type=bind,ro"
+	// ],
 	"runArgs": [
 		"--net=host", // 必须：共享主机网络，确保 ROS 2 发现机制正常
 		"--ipc=host", // 必须：提升节点间大数据传输效率

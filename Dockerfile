@@ -63,4 +63,7 @@ RUN echo "source /opt/ros/humble/setup.bash" >> ~/.bashrc && \
 
 ENV PATH="/workspaces/DogBot/.script:${PATH}"
 
-CMD ["bash"]
+# 5. 创建 XDG_RUNTIME_DIR 并赋予正确权限，解决 vscode-git.sock 无法创建的问题
+RUN mkdir -p /tmp/runtime-root && chmod 700 /tmp/runtime-root
+
+CMD ["/entrypoint"]
