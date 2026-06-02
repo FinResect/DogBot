@@ -7,4 +7,7 @@ fi
 
 cd "/workspaces/DogBot/dogbot_ws" || exit 1
 
-cmake -B build && make -C build 
+colcon build --symlink-install
+
+# 4. 加载环境
+source install/setup.bash
