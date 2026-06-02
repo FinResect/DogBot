@@ -1,2 +1,0 @@
-/usr/bin/ar qc libTOOLS_STATIC.a CMakeFiles/TOOLS_STATIC.dir/tools/hello.cpp.o
-/usr/bin/ranlib libTOOLS_STATIC.a

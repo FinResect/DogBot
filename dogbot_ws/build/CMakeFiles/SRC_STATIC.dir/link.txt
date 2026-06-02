@@ -1,2 +1,0 @@
-/usr/bin/ar qc libSRC_STATIC.a CMakeFiles/SRC_STATIC.dir/src/main.cpp.o
-/usr/bin/ranlib libSRC_STATIC.a

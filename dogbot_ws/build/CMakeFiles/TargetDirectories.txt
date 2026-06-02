@@ -1,5 +1,0 @@
-/workspaces/DogBot/dogbot_ws/build/CMakeFiles/SRC_STATIC.dir
-/workspaces/DogBot/dogbot_ws/build/CMakeFiles/TOOLS_STATIC.dir
-/workspaces/DogBot/dogbot_ws/build/CMakeFiles/main.dir
-/workspaces/DogBot/dogbot_ws/build/CMakeFiles/edit_cache.dir
-/workspaces/DogBot/dogbot_ws/build/CMakeFiles/rebuild_cache.dir
