@@ -9,10 +9,10 @@
 		"dockerfile": "../Dockerfile"
 	},
 	"initializeCommand": "xhost +local:root",
-	// "mounts": [
-    // // 挂载宿主机的全局 gitconfig 到容器内当前用户的家目录下
-    // "source=${localEnv:HOME}/.gitconfig,target=/root/.gitconfig,type=bind,ro"
-	// ],
+	"mounts": [
+        // 挂载到 /tmp 下作为临时参考文件
+        "source=${localEnv:HOME}/.gitconfig,target=/tmp/.host_gitconfig,type=bind,ro"
+    ],
 	"runArgs": [
 		"--net=host", // 必须：共享主机网络，确保 ROS 2 发现机制正常
 		"--ipc=host", // 必须：提升节点间大数据传输效率
@@ -71,5 +71,4 @@
 	},
 	// Uncomment to connect as an existing user other than the container default. More info: https://aka.ms/dev-containers-non-root.
 	// "remoteUser": "devcontainer"
-	"postCreateCommand": "echo 'source /opt/ros/humble/setup.bash' >> ~/.bashrc && chmod +x /workspaces/DogBot/.script/*"
-}
+	"postCreateCommand": "bash -c 'if [ -f /tmp/.host_gitconfig ]; then cp /tmp/.host_gitconfig /root/.gitconfig && chmod 644 /root/.gitconfig; fi && echo \"source /opt/ros/humble/setup.bash\" >> ~/.bashrc && (chmod +x /workspaces/DogBot/.script/* || true)'"}
