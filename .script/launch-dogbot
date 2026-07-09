@@ -1,6 +1,10 @@
 #!/bin/bash
 
-cd /workspaces/DogBot/ros2_ws
+source /opt/ros/humble/setup.bash
+
+: "${DOGBOT_PATH:=/workspaces/DogBot}"
+
+cd "${DOGBOT_PATH}/ros2_ws" || exit 1
 source install/setup.bash
 
-ros2 launch puppypi_description robot_description.launch.py
+exec "$@"

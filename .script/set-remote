@@ -1,0 +1,387 @@
+#!/usr/bin/env python3
+
+import os
+import re
+import sys
+import termios
+
+from colorama import Fore, Style
+
+
+# ============================================================
+# Terminal — spinner, raw input, prompt drawing
+# ============================================================
+
+class Terminal:
+    SPINNER = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
+
+    def __init__(self):
+        self._fd = sys.stdin.fileno()
+        self.buf = ""
+
+    def __enter__(self):
+        self._old = termios.tcgetattr(self._fd)
+        new = termios.tcgetattr(self._fd)
+        new[3] &= ~(termios.ECHO | termios.ICANON)
+        new[6][termios.VMIN] = 1
+        new[6][termios.VTIME] = 0
+        termios.tcsetattr(self._fd, termios.TCSANOW, new)
+        return self
+
+    def __exit__(self, *_):
+        termios.tcsetattr(self._fd, termios.TCSANOW, self._old)
+
+    def draw(self, discovered):
+        i = int(__import__("time").time() * 15) % len(self.SPINNER)
+        sp = self.SPINNER[i]
+        prompt = (
+            "Enter index to select or Ctrl+C to exit: "
+            if discovered
+            else "No addresses found. Enter index or Ctrl+C to exit: "
+        )
+        sys.stdout.write(f"\r\033[K{sp} {prompt}{self.buf}")
+        sys.stdout.flush()
+
+    def handle_input(self, raw, discovered):
+        if raw == b"\x03":
+            raise KeyboardInterrupt
+        if raw in (b"\r", b"\n"):
+            stripped = self.buf.strip()
+            self.buf = ""
+            if stripped:
+                try:
+                    _, ip = discovered[int(stripped)]
+                    sys.stdout.write("\n")
+                    sys.stdout.flush()
+                    return ip
+                except (ValueError, IndexError):
+                    pass
+            return None
+        elif raw in (b"\x7f", b"\x08"):
+            self.buf = self.buf[:-1]
+        elif len(raw) == 1 and 32 <= raw[0] <= 126:
+            self.buf += raw.decode()
+        return None
+
+
+# ============================================================
+# MDNSClient — socket lifecycle, query, resend, response parsing
+# ============================================================
+
+class MDNSClient:
+
+    PORT = 5353
+    MCAST4 = "224.0.0.251"
+    MCAST6 = "ff02::fb"
+    RESEND_INTERVAL = 1.0
+    _DNS_HDR = (
+        b"\x00\x00\x01\x00\x00\x01\x00\x00"
+        b"\x00\x00\x00\x00\x00\x00\x01\x00\x01"
+    )
+
+    def __init__(self, hostname):
+        import dpkt
+        import select
+        import socket
+        import struct
+
+        self._dpkt = dpkt
+        self._select = select
+        self._socket = socket
+        self._struct = struct
+
+        self.hostname = hostname
+        self.socks = {}
+        self.groups = []
+        self._qpkts = {}
+        self.discovered = []
+
+        self._build_queries()
+        self._open()
+
+    # ---- packet helpers ----
+
+    def _mk(self, name, qtype):
+        d = self._dpkt.dns.DNS(self._DNS_HDR)
+        d.qd[0].name = name
+        d.qd[0].type = qtype
+        return d.pack()
+
+    @staticmethod
+    def _safe_sendto(sock, pkt, addr):
+        try:
+            sock.sendto(pkt, addr)
+        except OSError:
+            pass
+
+    def _send_pkt(self, pkt):
+        for s4, s6 in self.groups:
+            if s4:
+                self._safe_sendto(s4, pkt, (self.MCAST4, self.PORT))
+            if s6:
+                self._safe_sendto(s6, pkt, (self.MCAST6, self.PORT))
+
+    # ---- queries ----
+
+    def _build_queries(self):
+        self._qpkts[(self.hostname, self._dpkt.dns.DNS_A)] = self._mk(
+            self.hostname, self._dpkt.dns.DNS_A
+        )
+        self._qpkts[(self.hostname, self._dpkt.dns.DNS_AAAA)] = self._mk(
+            self.hostname, self._dpkt.dns.DNS_AAAA
+        )
+
+    def resend(self):
+        for pkt in self._qpkts.values():
+            self._send_pkt(pkt)
+
+    def add_query(self, name, qtype):
+        k = (name, qtype)
+        if k not in self._qpkts:
+            self._qpkts[k] = self._mk(name, qtype)
+            self._send_pkt(self._qpkts[k])
+
+    # ---- sockets ----
+
+    def _open(self):
+        sk = self._socket
+        st = self._struct
+        psutil = __import__("psutil")
+
+        ifaces = list(psutil.net_if_addrs().items())
+        max_w = max((len(n) for n, _ in ifaces), default=0)
+
+        print("Sending mDNS query packet to interfaces...")
+        for iface, addrs in ifaces:
+            name = iface.ljust(max_w)
+            if iface.startswith(("lo", "docker", "br-")):
+                tag = "loopback" if iface.startswith("lo") else "docker"
+                print(
+                    f"    - {name} : {Fore.LIGHTBLACK_EX}"
+                    f"Skipped ({tag} interface).{Style.RESET_ALL}"
+                )
+                continue
+
+            ip4 = ip6 = None
+            for a in addrs:
+                if a.family == sk.AF_INET:
+                    ip4 = a.address
+                elif (
+                    a.family == sk.AF_INET6
+                    and a.address.startswith("fe80")
+                ):
+                    ip6 = a.address
+
+            if ip4 is None and ip6 is None:
+                print(
+                    f"    - {name} : {Fore.LIGHTBLACK_EX}"
+                    f"Skipped (interface down).{Style.RESET_ALL}"
+                )
+                continue
+
+            s4 = s6 = None
+            ver = []
+
+            if ip4:
+                s4 = sk.socket(sk.AF_INET, sk.SOCK_DGRAM)
+                s4.setsockopt(sk.SOL_SOCKET, sk.SO_REUSEADDR, 1)
+                s4.setsockopt(sk.SOL_SOCKET, sk.SO_REUSEPORT, 1)
+                s4.bind(("0.0.0.0", self.PORT))
+                s4.setsockopt(
+                    sk.IPPROTO_IP,
+                    sk.IP_ADD_MEMBERSHIP,
+                    st.pack(
+                        "4s4s",
+                        sk.inet_aton(self.MCAST4),
+                        sk.inet_aton(ip4),
+                    ),
+                )
+                s4.setsockopt(sk.SOL_SOCKET, 25, iface.encode() + b"\0")
+                s4.setsockopt(
+                    sk.IPPROTO_IP,
+                    sk.IP_MULTICAST_IF,
+                    sk.inet_aton(ip4),
+                )
+                ver.append("IPv4")
+
+            if ip6:
+                idx = sk.if_nametoindex(iface)
+                s6 = sk.socket(sk.AF_INET6, sk.SOCK_DGRAM)
+                s6.setsockopt(sk.SOL_SOCKET, sk.SO_REUSEADDR, 1)
+                s6.setsockopt(sk.SOL_SOCKET, sk.SO_REUSEPORT, 1)
+                s6.bind(("::", self.PORT))
+                s6.setsockopt(
+                    sk.IPPROTO_IPV6,
+                    sk.IPV6_JOIN_GROUP,
+                    st.pack(
+                        "16si",
+                        sk.inet_pton(sk.AF_INET6, self.MCAST6),
+                        idx,
+                    ),
+                )
+                s6.setsockopt(sk.SOL_SOCKET, 25, iface.encode() + b"\0")
+                s6.setsockopt(
+                    sk.IPPROTO_IPV6,
+                    sk.IPV6_MULTICAST_IF,
+                    idx,
+                )
+                ver.append("IPv6")
+
+            for pkt in self._qpkts.values():
+                if s4:
+                    self._safe_sendto(s4, pkt, (self.MCAST4, self.PORT))
+                if s6:
+                    self._safe_sendto(s6, pkt, (self.MCAST6, self.PORT))
+
+            ver_str = " & ".join(ver)
+            print(
+                f"    - {name} : {Fore.LIGHTGREEN_EX}"
+                f"Query sent successfully ({ver_str}).{Style.RESET_ALL}"
+            )
+
+            if s4:
+                self.socks[s4] = iface
+            if s6:
+                self.socks[s6] = iface
+            self.groups.append((s4, s6))
+
+    # ---- receive + parse ----
+
+    def recv(self, timeout):
+        fds = list(self.socks.keys())
+        ready, _, _ = self._select.select(fds, [], [], timeout)
+        return ready
+
+    def process(self, sock):
+        m = sock.recvfrom(1024)
+        try:
+            dns = self._dpkt.dns.DNS(m[0])
+        except self._dpkt.UnpackError:
+            return
+        if not dns.an:
+            return
+
+        for rr in dns.an:
+            if rr.name != self.hostname:
+                continue
+
+            if rr.type == self._dpkt.dns.DNS_A:
+                ip = self._socket.inet_ntoa(rr.rdata)
+            elif rr.type == self._dpkt.dns.DNS_AAAA:
+                ip = self._socket.inet_ntop(self._socket.AF_INET6, rr.rdata)
+                if ip.startswith("fe80"):
+                    ip = f"{ip}%{self.socks[sock]}"
+            else:
+                continue
+
+            entry = (rr.name, ip)
+            if entry not in self.discovered:
+                self.discovered.append(entry)
+                sys.stdout.write(
+                    f"\r\033[K{Fore.LIGHTBLACK_EX}>>  "
+                    f"{Fore.LIGHTCYAN_EX}{len(self.discovered) - 1}."
+                    f"{Style.RESET_ALL} {rr.name}: "
+                    f"{Fore.LIGHTGREEN_EX}{ip}{Style.RESET_ALL}\n"
+                )
+
+
+# ============================================================
+# Application logic
+# ============================================================
+
+def _print_usage():
+    print("""
+Usage: set-remote <remote_host>
+  1. IPv4 / IPv6 address (e.g., 169.254.233.233)
+  2. IPv4 / IPv6 link-local address (e.g., fe80::...%eth0)
+  3. mDNS hostname (e.g., my-sentry.local)
+""")
+
+
+def mdns_lookup(hostname):
+    if not sys.stdin.isatty():
+        sys.exit("Error: set-remote requires an interactive terminal.")
+
+    import time
+
+    client = MDNSClient(hostname)
+
+    with Terminal() as term:
+        fds = list(client.socks.keys()) + [sys.stdin]
+        last_resend = time.time()
+        term.draw(client.discovered)
+
+        while True:
+            ready, _, _ = __import__("select").select(
+                fds, [], [], 0.05
+            )
+            now = time.time()
+
+            if now - last_resend >= MDNSClient.RESEND_INTERVAL:
+                client.resend()
+                last_resend = now
+
+            if sys.stdin in ready:
+                result = term.handle_input(
+                    sys.stdin.buffer.raw.read(1), client.discovered
+                )
+                if result:
+                    return result
+                continue
+
+            for sock in ready:
+                if sock is not sys.stdin:
+                    client.process(sock)
+
+            term.draw(client.discovered)
+
+
+def set_remote(address):
+    ssh_path = os.path.join(os.getenv("HOME"), ".ssh", "config")
+    try:
+        config = open(ssh_path).read()
+    except FileNotFoundError:
+        sys.exit("Error: SSH config file not found.")
+
+    ipv6 = ":" in address
+    address = re.sub(r"(?<!%)%(?!%)", "%%", address)
+
+    config, n1 = re.subn(
+        r"Host remote\n    HostName [^\n]+",
+        f"Host remote\n    HostName {address}",
+        config,
+    )
+    config, n2 = re.subn(
+        r"(Host remote\n(?:(?!Host ).+\n)*)    AddressFamily inet6?",
+        rf"\1    AddressFamily {'inet6' if ipv6 else 'inet'}",
+        config,
+    )
+
+    if not n1 or not n2:
+        sys.exit("Error: Cannot find expected entries in SSH config.")
+
+    with open(ssh_path, "w") as f:
+        f.write(config)
+
+
+if __name__ == "__main__":
+    try:
+        if len(sys.argv) != 2 or sys.argv[1] in ("-h", "--help"):
+            _print_usage()
+            sys.exit(1)
+
+        host = sys.argv[1]
+        if host.endswith(".local") or host.endswith(".local."):
+            print(
+                "An mDNS hostname was provided."
+                " Will resolve it to an IP address."
+            )
+            host = mdns_lookup(host)
+
+        set_remote(host)
+        print(
+            f"Successfully set remote host to "
+            f"{Fore.LIGHTGREEN_EX}{host}{Style.RESET_ALL}."
+        )
+    except KeyboardInterrupt:
+        sys.exit(1)

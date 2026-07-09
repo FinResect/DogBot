@@ -1,0 +1,8 @@
+#!/bin/bash
+
+# if arg[1] == "-r"
+if [ "$1" == "-r" ]; then
+    ssh-remote "service dogbot restart && service dogbot attach"
+else
+    ssh-remote "service dogbot attach"
+fi

@@ -1,5 +1,13 @@
 #!/bin/bash
 
-rm -rf /workspaces/DogBot/ros2_ws/build
-rm -rf /workspaces/DogBot/ros2_ws/install
-rm -rf /workspaces/DogBot/ros2_ws/log
+: "${DOGBOT_PATH:=/workspaces/DogBot}"
+
+if [[ -z "${DOGBOT_PATH}" || "${DOGBOT_PATH}" == "/" ]]; then
+    echo "Invalid DOGBOT_PATH: '${DOGBOT_PATH}'"
+    exit 1
+fi
+
+rm -rf -- \
+    "${DOGBOT_PATH}/ros2_ws/build" \
+    "${DOGBOT_PATH}/ros2_ws/install" \
+    "${DOGBOT_PATH}/ros2_ws/log"
