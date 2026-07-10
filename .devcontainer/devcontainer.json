@@ -11,10 +11,10 @@
     "runArgs": [
         "--net=host",
         "--ipc=host",
-        "--gpus=all",
+        // "--gpus=all",
         "-e", "DISPLAY=${localEnv:DISPLAY}",
-        "-e", "NVIDIA_DRIVER_CAPABILITIES=all",
-        "-e", "NVIDIA_VISIBLE_DEVICES=all",
+        // "-e", "NVIDIA_DRIVER_CAPABILITIES=all",
+        // "-e", "NVIDIA_VISIBLE_DEVICES=all",
         "-v", "/tmp/.X11-unix:/tmp/.X11-unix:rw"
     ],
 
