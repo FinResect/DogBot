@@ -37,10 +37,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
             libatlas-base-dev \
             libsuitesparse-dev \
             libceres-dev ;; \
-        arm64) echo "Skipping amd64-only -dev packages for arm64 runtime" ;; \
+         arm64) echo "Skipping amd64-only -dev packages for arm64 runtime" ;; \
     esac \
-    && apt-get clean && \
-    rm -rf /var/lib/apt/lists/* /tmp/*
+    && apt-get clean || true && \
+    rm -rf /var/lib/apt/lists/* /tmp/* || true
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ocaml-nox \
