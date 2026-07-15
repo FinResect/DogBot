@@ -1,5 +1,4 @@
-ARG SYSROOT_IMAGE_AMD64=dogbot-sysroot-amd64:latest
-ARG SYSROOT_IMAGE_ARM64=dogbot-sysroot-arm64:latest
+ARG SYSROOT_IMAGE_ARM64=dogbot-base:arm64
 
 FROM ros:humble-ros-base AS dogbot-base
 ARG TARGETARCH
@@ -11,6 +10,7 @@ ENV TZ=Asia/Shanghai \
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     python3-colcon-common-extensions \
+    python3-dev \
     wget curl unzip \
     zsh screen tmux \
     git vim \
@@ -145,67 +145,62 @@ RUN mkdir -p \
 WORKDIR /home/ubuntu
 ENV USER=ubuntu
 ENV HOME=/home/ubuntu
+ENV DOGBOT_PATH=/workspaces/DogBot
+ENV PATH="${PATH}:${DOGBOT_PATH}/.script"
 USER ubuntu
+
+COPY --chown=1000:1000 .script/template/env_setup.bash env_setup.bash
+COPY --chown=1000:1000 .script/template/env_setup.zsh env_setup.zsh
 
 RUN sh -c "$(wget https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh -O -)" && \
     sed -i 's/ZSH_THEME=\"[a-z0-9\-]*\"/ZSH_THEME="af-magic"/g' ~/.zshrc && \
     sed -i 's/plugins=(git)/plugins=()/g' ~/.zshrc && \
     sed -i "s/# zstyle ':omz:update' mode disabled/zstyle ':omz:update' mode disabled/g" ~/.zshrc && \
-    echo '# export DOGBOT_PATH="/workspaces/DogBot"' >> ~/.zshrc
+    echo '# Hint: uncomment and set DOGBOT_PATH if DogBot is not located at /workspaces/DogBot.' >> ~/.zshrc && \
+    echo '# export DOGBOT_PATH="/workspaces/DogBot"' >> ~/.zshrc && \
+    echo 'source ~/env_setup.zsh' >> ~/.zshrc
 
-FROM --platform=linux/amd64 ${SYSROOT_IMAGE_AMD64} AS dogbot-sysroot-amd64
 FROM --platform=linux/arm64 ${SYSROOT_IMAGE_ARM64} AS dogbot-sysroot-arm64
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libboost-dev \
+    libboost-system-dev \
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
 
 FROM dogbot-develop AS dogbot-develop-full
-ARG TARGETARCH
 
 USER root
 
 RUN apt-get update && \
-    case "${TARGETARCH}" in \
-        amd64) cross_triplet=aarch64-linux-gnu; cross_pkg_triplet=aarch64-linux-gnu ;; \
-        arm64) cross_triplet=x86_64-linux-gnu; cross_pkg_triplet=x86-64-linux-gnu ;; \
-        *) echo "Unsupported TARGETARCH: ${TARGETARCH}" >&2; exit 1 ;; \
-    esac && \
     apt-get install -y --no-install-recommends \
-        "gcc-12-${cross_pkg_triplet}" "g++-12-${cross_pkg_triplet}" \
-        "binutils-${cross_pkg_triplet}" && \
-    update-alternatives --install "/usr/bin/${cross_triplet}-gcc" "${cross_triplet}-gcc" "/usr/bin/${cross_triplet}-gcc-12" 50 && \
-    update-alternatives --install "/usr/bin/${cross_triplet}-g++" "${cross_triplet}-g++" "/usr/bin/${cross_triplet}-g++-12" 50 && \
+        gcc-12-aarch64-linux-gnu \
+        g++-12-aarch64-linux-gnu \
+        binutils-aarch64-linux-gnu && \
+    update-alternatives --install /usr/bin/aarch64-linux-gnu-gcc aarch64-linux-gnu-gcc /usr/bin/aarch64-linux-gnu-gcc-12 50 && \
+    update-alternatives --install /usr/bin/aarch64-linux-gnu-g++ aarch64-linux-gnu-g++ /usr/bin/aarch64-linux-gnu-g++-12 50 && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/* /tmp/*
 
-RUN mkdir -p /opt/sysroots && \
-    case "${TARGETARCH}" in \
-        amd64) mkdir -p /opt/sysroots/arm64 ;; \
-        arm64) mkdir -p /opt/sysroots/amd64 ;; \
-        *) echo "Unsupported TARGETARCH: ${TARGETARCH}" >&2; exit 1 ;; \
-    esac
+RUN mkdir -p /opt/sysroots/arm64
 
-RUN --mount=from=dogbot-sysroot-amd64,target=/mnt/sysroot-amd64,readonly \
-    --mount=from=dogbot-sysroot-arm64,target=/mnt/sysroot-arm64,readonly \
+RUN --mount=from=dogbot-sysroot-arm64,target=/mnt/sysroot-arm64,readonly \
     set -euo pipefail && \
-    case "${TARGETARCH}" in \
-        amd64) tar \
-            --exclude='./dev/*' \
-            --exclude='./proc/*' \
-            --exclude='./sys/*' \
-            --exclude='./run/*' \
-            --exclude='./tmp/*' \
-            -C /mnt/sysroot-arm64 -cf - . | tar -C /opt/sysroots/arm64 -xf - ;; \
-        arm64) tar \
-            --exclude='./dev/*' \
-            --exclude='./proc/*' \
-            --exclude='./sys/*' \
-            --exclude='./run/*' \
-            --exclude='./tmp/*' \
-            -C /mnt/sysroot-amd64 -cf - . | tar -C /opt/sysroots/amd64 -xf - ;; \
-        *) echo "Unsupported TARGETARCH: ${TARGETARCH}" >&2; exit 1 ;; \
-    esac
+    tar \
+        --exclude='./dev/*' \
+        --exclude='./proc/*' \
+        --exclude='./sys/*' \
+        --exclude='./run/*' \
+        --exclude='./tmp/*' \
+        -C /mnt/sysroot-arm64 -cf - . | tar -C /opt/sysroots/arm64 -xf -
+
+COPY .script/fix-sysroot-cross-paths /usr/local/bin/fix-sysroot-cross-paths
+RUN chmod +x /usr/local/bin/fix-sysroot-cross-paths && \
+    fix-sysroot-cross-paths /opt/sysroots/arm64
 
 WORKDIR /home/ubuntu
 ENV USER=ubuntu
 ENV HOME=/home/ubuntu
+ENV DOGBOT_PATH=/workspaces/DogBot
+ENV PATH="${PATH}:${DOGBOT_PATH}/.script"
 USER ubuntu
 
 FROM dogbot-base AS dogbot-runtime

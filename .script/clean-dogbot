@@ -7,7 +7,7 @@ if [[ -z "${DOGBOT_PATH}" || "${DOGBOT_PATH}" == "/" ]]; then
     exit 1
 fi
 
-rm -rf -- \
-    "${DOGBOT_PATH}/ros2_ws/build" \
-    "${DOGBOT_PATH}/ros2_ws/install" \
-    "${DOGBOT_PATH}/ros2_ws/log"
+sudo rm -rf -- \
+    "${DOGBOT_PATH}/ros2_ws/build-cross-arm64" \
+    "${DOGBOT_PATH}/ros2_ws/install-cross-arm64" \
+    "${DOGBOT_PATH}/ros2_ws/log-cross-arm64"

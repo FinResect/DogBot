@@ -14,7 +14,7 @@ start() {
 
     source ~/env_setup.bash
 
-    screen -dmS dogbot bash -c "ros2 launch navigation navigation.launch.py"
+    screen -dmS dogbot bash -c "ros2 launch dogbot_start start.launch.py"
 
     sleep 0.1
 

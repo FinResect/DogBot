@@ -1,6 +1,6 @@
 #!/bin/bash
 
-: "${DOGBOT_PATH:=/workspaces/dogbot_runtime}"
+: "${DOGBOT_PATH:=/workspaces/DogBot}"
 
 export ROS_AUTOMATIC_DISCOVERY_RANGE=LOCALHOST
 export RCUTILS_COLORIZED_OUTPUT=1

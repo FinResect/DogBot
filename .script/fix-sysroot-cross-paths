@@ -1,0 +1,29 @@
+#!/bin/bash
+
+set -euo pipefail
+
+sysroot="${1:-/opt/sysroots/arm64}"
+
+if [[ ! -d "${sysroot}" ]]; then
+    echo "> ERROR: Sysroot not found: ${sysroot}"
+    exit 1
+fi
+
+echo "> Rerooting absolute /usr paths in CMake files under ${sysroot}"
+
+mapfile -t cmake_files < <(grep -rlE '["; :(]/usr/(lib|include)' \
+    "${sysroot}/opt/ros/humble/share" --include='*.cmake' 2>/dev/null || true)
+
+if [[ ${#cmake_files[@]} -eq 0 ]]; then
+    echo "> Nothing to do (already rerooted or no matches)"
+    exit 0
+fi
+
+for f in "${cmake_files[@]}"; do
+    sed -i \
+        -e "s|\([\"; :(]\)/usr/lib|\1${sysroot}/usr/lib|g" \
+        -e "s|\([\"; :(]\)/usr/include|\1${sysroot}/usr/include|g" \
+        "${f}"
+done
+
+echo "> Patched ${#cmake_files[@]} file(s)"

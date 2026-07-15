@@ -2,26 +2,18 @@
 
 set -euo pipefail
 
-: "${DOGBOT_PATH:=/workspaces/DogBot}"
+script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+repo_root="$(cd -- "${script_dir}/.." && pwd)"
+
+: "${DOGBOT_PATH:=${repo_root}}"
 
 target_arch=arm64
+target_triplet=aarch64-linux-gnu
 colcon_args=("$@")
 
-case "${target_arch}" in
-arm64)
-    target_triplet="aarch64-linux-gnu"
-    ;;
-amd64)
-    target_triplet="x86_64-linux-gnu"
-    ;;
-*)
-    echo "> ERROR: Unsupported target arch '${target_arch}'."
-    exit 1
-    ;;
-esac
-
 workspace="${DOGBOT_PATH}/ros2_ws"
-sysroot="${DOGBOT_SYSROOT:-/opt/sysroots/${target_arch}}"
+sysroot=/opt/sysroots/${target_arch}
+toolchain_file="${workspace}/toolchain.cmake"
 
 if [[ ! -d "${workspace}" ]]; then
     echo "> ERROR: Workspace not found: ${workspace}"
@@ -30,16 +22,26 @@ fi
 
 if [[ ! -d "${sysroot}" ]]; then
     echo "> ERROR: Sysroot not found: ${sysroot}"
+    echo ">        Build dogbot-develop-full first:"
+    echo ">          docker buildx build . --platform linux/amd64 --target dogbot-develop-full \\"
+    echo ">            --build-arg SYSROOT_IMAGE_ARM64=dogbot-base:arm64 --load"
+    exit 1
+fi
+
+if [[ ! -f "${toolchain_file}" ]]; then
+    echo "> ERROR: Toolchain file not found: ${toolchain_file}"
     exit 1
 fi
 
 if ! command -v "${target_triplet}-gcc" &>/dev/null; then
     echo "> ERROR: Missing cross compiler: ${target_triplet}-gcc"
+    echo ">        Build dogbot-develop-full first."
     exit 1
 fi
 
 if ! command -v "${target_triplet}-g++" &>/dev/null; then
     echo "> ERROR: Missing cross compiler: ${target_triplet}-g++"
+    echo ">        Build dogbot-develop-full first."
     exit 1
 fi
 
@@ -68,28 +70,31 @@ unset CMAKE_PROGRAM_PATH
 unset CMAKE_TOOLCHAIN_FILE
 unset CMAKE_GENERATOR
 
+restore_nounset=0
+case "$-" in
+*u*)
+    restore_nounset=1
+    set +u
+    ;;
+esac
 source /opt/ros/humble/setup.bash
-
-export DOGBOT_TARGET_ARCH="${target_arch}"
-export DOGBOT_TARGET_TRIPLET="${target_triplet}"
-export DOGBOT_SYSROOT="${sysroot}"
+if ((restore_nounset)); then
+    set -u
+fi
 
 export CC="$(command -v "${target_triplet}-gcc")"
 export CXX="$(command -v "${target_triplet}-g++")"
 
-export CMAKE_PREFIX_PATH="${DOGBOT_SYSROOT}/opt/ros/humble:${DOGBOT_SYSROOT}/usr/local:${DOGBOT_SYSROOT}/usr"
-export AMENT_PREFIX_PATH="${DOGBOT_SYSROOT}/opt/ros/humble"
-export COLCON_PREFIX_PATH="${DOGBOT_SYSROOT}/opt/ros/humble"
+export CMAKE_PREFIX_PATH="${sysroot}/opt/ros/humble:${sysroot}/usr/local:${sysroot}/usr"
+export AMENT_PREFIX_PATH="${sysroot}/opt/ros/humble"
+export COLCON_PREFIX_PATH="${sysroot}/opt/ros/humble"
 export PKG_CONFIG_PATH=""
-
-export PKG_CONFIG_SYSROOT_DIR="${DOGBOT_SYSROOT}"
-export PKG_CONFIG_LIBDIR="${DOGBOT_SYSROOT}/usr/local/lib/${DOGBOT_TARGET_TRIPLET}/pkgconfig:${DOGBOT_SYSROOT}/usr/local/lib/pkgconfig:${DOGBOT_SYSROOT}/usr/local/share/pkgconfig:${DOGBOT_SYSROOT}/usr/lib/${DOGBOT_TARGET_TRIPLET}/pkgconfig:${DOGBOT_SYSROOT}/usr/lib/pkgconfig:${DOGBOT_SYSROOT}/usr/share/pkgconfig:${DOGBOT_SYSROOT}/lib/${DOGBOT_TARGET_TRIPLET}/pkgconfig:${DOGBOT_SYSROOT}/lib/pkgconfig:${DOGBOT_SYSROOT}/opt/ros/humble/lib/${DOGBOT_TARGET_TRIPLET}/pkgconfig:${DOGBOT_SYSROOT}/opt/ros/humble/lib/pkgconfig:${DOGBOT_SYSROOT}/opt/ros/humble/share/pkgconfig"
 
 cd "${workspace}"
 
-build_base="build-cross-${DOGBOT_TARGET_ARCH}"
-install_base="install-cross-${DOGBOT_TARGET_ARCH}"
-log_base="log-cross-${DOGBOT_TARGET_ARCH}"
+build_base=build-cross-${target_arch}
+install_base=install-cross-${target_arch}
+log_base=log-cross-${target_arch}
 
 CLICOLOR_FORCE=1 NINJA_STATUS="" \
     colcon \
@@ -100,7 +105,4 @@ CLICOLOR_FORCE=1 NINJA_STATUS="" \
     --install-base "${install_base}" \
     "${colcon_args[@]}" \
     --cmake-args \
-    -DCMAKE_TOOLCHAIN_FILE="${workspace}/toolchain.cmake" \
-    -DDOGBOT_TARGET_ARCH="${DOGBOT_TARGET_ARCH}" \
-    -DDOGBOT_SYSROOT="${DOGBOT_SYSROOT}" \
-    -DDOGBOT_TARGET_TRIPLET="${DOGBOT_TARGET_TRIPLET}"
+    -DCMAKE_TOOLCHAIN_FILE="${toolchain_file}"

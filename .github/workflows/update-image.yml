@@ -1,0 +1,267 @@
+name: Build and Push DogBot Images
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - Dockerfile
+      - .github/workflows/update-image.yml
+      - .script/build-dogbot
+      - ros2_ws/toolchain.cmake
+
+env:
+  REGISTRY_IMAGE_BASE: qzhhhi/dogbot-base
+  REGISTRY_IMAGE_DEVELOP: qzhhhi/dogbot-develop
+  REGISTRY_IMAGE_RUNTIME: qzhhhi/dogbot-runtime
+
+jobs:
+  build_base:
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v4
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Build and push by digest (Base)
+        id: build_base
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          target: dogbot-base
+          platforms: linux/arm64
+          outputs: type=image,name=${{ env.REGISTRY_IMAGE_BASE }},push-by-digest=true,name-canonical=true,push=true
+          cache-from: type=gha,scope=docker-build-base-arm64
+          cache-to: type=gha,mode=max,scope=docker-build-base-arm64
+
+      - name: Export digest (Base)
+        run: |
+          mkdir -p "${{ runner.temp }}/digests-base"
+          printf '%s\n' "${{ steps.build_base.outputs.digest }}" > "${{ runner.temp }}/digests-base/arm64.digest"
+
+      - name: Upload digest (Base)
+        uses: actions/upload-artifact@v6
+        with:
+          name: digests-base-arm64
+          path: ${{ runner.temp }}/digests-base/*.digest
+          if-no-files-found: error
+          retention-days: 1
+
+  build_images:
+    needs: build_base
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v4
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Set up SSH keys
+        run: |
+          mkdir -p .ssh
+          chmod 700 .ssh
+          echo "${{ secrets.CONTAINER_ID_RSA }}" > .ssh/id_rsa
+          echo "${{ secrets.CONTAINER_ID_RSA_PUB }}" > .ssh/id_rsa.pub
+          chmod 600 .ssh/id_rsa
+          chmod 644 .ssh/id_rsa.pub
+
+      - name: Download digest (Base)
+        uses: actions/download-artifact@v7
+        with:
+          path: ${{ runner.temp }}/digests/base
+          pattern: digests-base-*
+          merge-multiple: true
+
+      - name: Resolve base digest
+        id: resolve
+        run: |
+          set -euo pipefail
+          base_dir="${{ runner.temp }}/digests/base"
+          base_digest_arm64="$(cat "${base_dir}/arm64.digest")"
+          echo "base_digest_arm64=${base_digest_arm64}" >> "$GITHUB_OUTPUT"
+
+      - name: Build and push by digest (Develop)
+        id: build_develop
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          target: dogbot-develop
+          platforms: linux/amd64
+          outputs: type=image,name=${{ env.REGISTRY_IMAGE_DEVELOP }},push-by-digest=true,name-canonical=true,push=true
+          cache-from: type=gha,scope=docker-build-develop-amd64
+          cache-to: type=gha,mode=max,scope=docker-build-develop-amd64
+
+      - name: Export digest (Develop)
+        run: |
+          mkdir -p "${{ runner.temp }}/digests-develop"
+          printf '%s\n' "${{ steps.build_develop.outputs.digest }}" > "${{ runner.temp }}/digests-develop/amd64.digest"
+
+      - name: Upload digest (Develop)
+        uses: actions/upload-artifact@v6
+        with:
+          name: digests-develop-amd64
+          path: ${{ runner.temp }}/digests-develop/*.digest
+          if-no-files-found: error
+          retention-days: 1
+
+      - name: Build and push by digest (Develop Full)
+        id: build_develop_full
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          target: dogbot-develop-full
+          platforms: linux/amd64
+          build-args: |
+            SYSROOT_IMAGE_ARM64=${{ env.REGISTRY_IMAGE_BASE }}@${{ steps.resolve.outputs.base_digest_arm64 }}
+          outputs: type=image,name=${{ env.REGISTRY_IMAGE_DEVELOP }},push-by-digest=true,name-canonical=true,push=true
+          cache-from: type=gha,scope=docker-build-develop-full-amd64
+          cache-to: type=gha,mode=max,scope=docker-build-develop-full-amd64
+
+      - name: Export digest (Develop Full)
+        run: |
+          mkdir -p "${{ runner.temp }}/digests-develop-full"
+          printf '%s\n' "${{ steps.build_develop_full.outputs.digest }}" > "${{ runner.temp }}/digests-develop-full/amd64.digest"
+
+      - name: Upload digest (Develop Full)
+        uses: actions/upload-artifact@v6
+        with:
+          name: digests-develop-full-amd64
+          path: ${{ runner.temp }}/digests-develop-full/*.digest
+          if-no-files-found: error
+          retention-days: 1
+
+  verify:
+    needs: build_images
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v4
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Download digest (Develop Full)
+        uses: actions/download-artifact@v7
+        with:
+          path: ${{ runner.temp }}/digests/develop-full
+          pattern: digests-develop-full-*
+          merge-multiple: true
+
+      - name: Resolve develop-full digest
+        id: resolve
+        run: |
+          set -euo pipefail
+          digest_file="${{ runner.temp }}/digests/develop-full/amd64.digest"
+          image_digest="$(cat "${digest_file}")"
+          echo "image_digest=${image_digest}" >> "$GITHUB_OUTPUT"
+
+      - name: Smoke test (cross build + readelf)
+        env:
+          IMAGE_DIGEST: ${{ steps.resolve.outputs.image_digest }}
+        run: |
+          set -euo pipefail
+          uid="$(id -u)"
+          gid="$(id -g)"
+          docker run --rm \
+            --platform linux/amd64 \
+            --user "${uid}:${gid}" \
+            -e HOME=/tmp/dogbot-home \
+            -e DOGBOT_PATH=/workspaces/DogBot \
+            -v "$PWD:/workspaces/DogBot" \
+            -w /workspaces/DogBot \
+            "${{ env.REGISTRY_IMAGE_DEVELOP }}@${IMAGE_DIGEST}" \
+            bash -lc '
+              set -euo pipefail
+              mkdir -p "${HOME}"
+              test -d /opt/sysroots/arm64
+              command -v aarch64-linux-gnu-gcc
+              command -v aarch64-linux-gnu-g++
+              ./.script/build-dogbot --packages-up-to ros_robot_controller_msgs
+              lib_path="/workspaces/DogBot/ros2_ws/install-cross-arm64/lib/libros_robot_controller_msgs__rosidl_typesupport_cpp.so"
+              if [[ ! -f "${lib_path}" ]]; then
+                echo "Missing library: ${lib_path}" >&2
+                exit 1
+              fi
+              readelf -h "${lib_path}" | grep -q "Machine:.*AArch64"
+            '
+
+  promote:
+    runs-on: ubuntu-latest
+    needs:
+      - build_base
+      - build_images
+      - verify
+    steps:
+      - name: Download digest (Base)
+        uses: actions/download-artifact@v7
+        with:
+          path: ${{ runner.temp }}/digests/base
+          pattern: digests-base-arm64
+          merge-multiple: true
+
+      - name: Download digest (Develop)
+        uses: actions/download-artifact@v7
+        with:
+          path: ${{ runner.temp }}/digests/develop
+          pattern: digests-develop-amd64
+          merge-multiple: true
+
+      - name: Download digest (Develop Full)
+        uses: actions/download-artifact@v7
+        with:
+          path: ${{ runner.temp }}/digests/develop-full
+          pattern: digests-develop-full-amd64
+          merge-multiple: true
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v4
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Create tags and push
+        run: |
+          set -euo pipefail
+
+          push_tag() {
+            local image="$1"
+            local tag="$2"
+            local digest_file="$3"
+            local ref="${image}@$(cat "${digest_file}")"
+            docker buildx imagetools create -t "${image}:${tag}" "${ref}"
+          }
+
+          push_tag "${{ env.REGISTRY_IMAGE_BASE }}" "latest" \
+            "${{ runner.temp }}/digests/base/arm64.digest"
+          push_tag "${{ env.REGISTRY_IMAGE_DEVELOP }}" "latest" \
+            "${{ runner.temp }}/digests/develop/amd64.digest"
+          push_tag "${{ env.REGISTRY_IMAGE_DEVELOP }}" "latest-full" \
+            "${{ runner.temp }}/digests/develop-full/amd64.digest"
+
+      - name: Inspect images
+        run: |
+          docker buildx imagetools inspect "${{ env.REGISTRY_IMAGE_BASE }}:latest"
+          docker buildx imagetools inspect "${{ env.REGISTRY_IMAGE_DEVELOP }}:latest"
+          docker buildx imagetools inspect "${{ env.REGISTRY_IMAGE_DEVELOP }}:latest-full"

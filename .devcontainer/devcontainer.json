@@ -4,7 +4,7 @@
     "build": {
         "context": "..",
         "dockerfile": "../Dockerfile",
-        "target": "dogbot-develop"
+        "target": "dogbot-develop-full"
     },
     "privileged": true,
 
@@ -19,7 +19,8 @@
     ],
 
     "containerEnv": {
-        "XDG_RUNTIME_DIR": "/tmp/runtime-root"
+        "XDG_RUNTIME_DIR": "/tmp/runtime-root",
+        "DOGBOT_PATH": "/workspaces/DogBot"
     },
 
     "mounts": [
