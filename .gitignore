@@ -4,8 +4,6 @@ log/
 build-cross-*/
 install-cross-*/
 log-cross-*/
-
-# SSH key files (generated during docker build, DO NOT COMMIT)
-id_rsa
-id_rsa.pub
 USAGE.md
+.ssh/id_rsa
+.ssh/id_rsa.pub

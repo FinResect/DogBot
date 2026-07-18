@@ -23,14 +23,9 @@ docker load -i dogbot-runtime-arm64.tar
 ### 3. 启动容器
 
 ```bash
-docker run -d \
-  --restart=always \
-  --privileged \
-  --network=host \
-  --dns 192.168.1.1 \
-  --dns 8.8.8.8 \
+docker run -d --restart=always --privileged --network=host \
   -v /dev:/dev \
-  -v /opt/dogbot/install:/dogbot_install:ro \
+  -v /opt/dogbot/install:/dogbot_install \
   --name dogbot \
   dogbot-runtime:arm64
 ```
@@ -41,11 +36,11 @@ docker run -d \
 | `--restart=always` | 崩溃自动重启 + 开机自启 |
 | `--privileged` | 容器拥有宿主机所有硬件访问权限 |
 | `--network=host` | 共享宿主机网络栈（ROS2 发现需要） |
-| `--dns 192.168.1.1` | 主 DNS，改用你的路由器地址 |
-| `--dns 8.8.8.8` | 备 DNS |
 | `-v /dev:/dev` | 把宿主机全部 `/dev` 挂进容器，免去逐个 `--device` |
 | `-v /opt/dogbot/install:/dogbot_install:ro` | 交叉编译产物只读挂载 |
 | `--name dogbot` | 容器名 |
+
+> 容器内域名解析失败时可追加 `--dns <路由器IP> --dns 8.8.8.8`。
 
 ### 4. 查看运行状态
 
