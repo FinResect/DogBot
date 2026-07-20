@@ -1,0 +1,108 @@
+#!/bin/bash
+
+set -euo pipefail
+
+script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+repo_root="$(cd -- "${script_dir}/.." && pwd)"
+
+: "${DOGBOT_PATH:=${repo_root}}"
+
+target_arch=arm64
+target_triplet=aarch64-linux-gnu
+colcon_args=("$@")
+
+workspace="${DOGBOT_PATH}/ros2_ws"
+sysroot=/opt/sysroots/${target_arch}
+toolchain_file="${workspace}/toolchain.cmake"
+
+if [[ ! -d "${workspace}" ]]; then
+    echo "> ERROR: Workspace not found: ${workspace}"
+    exit 1
+fi
+
+if [[ ! -d "${sysroot}" ]]; then
+    echo "> ERROR: Sysroot not found: ${sysroot}"
+    echo ">        Build dogbot-develop-full first:"
+    echo ">          docker buildx build . --platform linux/amd64 --target dogbot-develop-full \\"
+    echo ">            --build-arg SYSROOT_IMAGE_ARM64=dogbot-base:arm64 --load"
+    exit 1
+fi
+
+if [[ ! -f "${toolchain_file}" ]]; then
+    echo "> ERROR: Toolchain file not found: ${toolchain_file}"
+    exit 1
+fi
+
+if ! command -v "${target_triplet}-gcc" &>/dev/null; then
+    echo "> ERROR: Missing cross compiler: ${target_triplet}-gcc"
+    echo ">        Build dogbot-develop-full first."
+    exit 1
+fi
+
+if ! command -v "${target_triplet}-g++" &>/dev/null; then
+    echo "> ERROR: Missing cross compiler: ${target_triplet}-g++"
+    echo ">        Build dogbot-develop-full first."
+    exit 1
+fi
+
+unset AMENT_PREFIX_PATH
+unset CMAKE_PREFIX_PATH
+unset COLCON_PREFIX_PATH
+unset AMENT_CURRENT_PREFIX
+unset PKG_CONFIG_PATH
+unset PKG_CONFIG_LIBDIR
+unset PKG_CONFIG_SYSROOT_DIR
+unset ROS_PACKAGE_PATH
+unset PYTHONPATH
+unset PYTHONHOME
+unset LD_LIBRARY_PATH
+unset LIBRARY_PATH
+unset CPATH
+unset C_INCLUDE_PATH
+unset CPLUS_INCLUDE_PATH
+unset CFLAGS
+unset CXXFLAGS
+unset CPPFLAGS
+unset LDFLAGS
+unset CMAKE_INCLUDE_PATH
+unset CMAKE_LIBRARY_PATH
+unset CMAKE_PROGRAM_PATH
+unset CMAKE_TOOLCHAIN_FILE
+unset CMAKE_GENERATOR
+
+restore_nounset=0
+case "$-" in
+*u*)
+    restore_nounset=1
+    set +u
+    ;;
+esac
+source /opt/ros/humble/setup.bash
+if ((restore_nounset)); then
+    set -u
+fi
+
+export CC="$(command -v "${target_triplet}-gcc")"
+export CXX="$(command -v "${target_triplet}-g++")"
+
+export CMAKE_PREFIX_PATH="${sysroot}/opt/ros/humble:${sysroot}/usr/local:${sysroot}/usr"
+export AMENT_PREFIX_PATH="${sysroot}/opt/ros/humble"
+export COLCON_PREFIX_PATH="${sysroot}/opt/ros/humble"
+export PKG_CONFIG_PATH=""
+
+cd "${workspace}"
+
+build_base=build
+install_base=install
+log_base=log
+
+CLICOLOR_FORCE=1 NINJA_STATUS="" \
+    colcon \
+    --log-base "${log_base}" \
+    build \
+    --merge-install \
+    --build-base "${build_base}" \
+    --install-base "${install_base}" \
+    "${colcon_args[@]}" \
+    --cmake-args \
+    -DCMAKE_TOOLCHAIN_FILE="${toolchain_file}"

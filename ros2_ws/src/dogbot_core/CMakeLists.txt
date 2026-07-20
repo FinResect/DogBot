@@ -10,7 +10,8 @@ find_package(rclcpp REQUIRED)
 
 install(FILES config/nodes.yaml DESTINATION share/${PROJECT_NAME}/config)
 
-add_executable(dogbot_core_node src/dogbot_core_node.cpp)
+file(GLOB_RECURSE SOURCES src/*.cpp)
+add_executable(dogbot_core_node ${SOURCES})
 target_link_libraries(dogbot_core_node rclcpp::rclcpp)
 install(TARGETS dogbot_core_node DESTINATION lib/${PROJECT_NAME})
 
