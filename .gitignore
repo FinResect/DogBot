@@ -1,10 +1,11 @@
 build/
 install/
 log/
-build-cross-*/
-install-cross-*/
-log-cross-*/
+build-cross/
+install-cross/
+log-cross/
 USAGE.md
 .ssh/id_rsa
 .ssh/id_rsa.pub
 .cache
+.ENVIRONMENT.md

@@ -9,7 +9,7 @@ from colorama import Fore, Style
 
 
 DOGBOT_PATH = os.getenv("DOGBOT_PATH") or "/workspaces/DogBot"
-SRC_DIR = os.path.join(DOGBOT_PATH, "ros2_ws", "install")
+SRC_DIR = os.path.join(DOGBOT_PATH, "ros2_ws", "install-cross")
 DST_DIR = "ssh://remote//dogbot_install"
 SOCKET_PATH = "/tmp/sync-remote"
 

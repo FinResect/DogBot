@@ -65,4 +65,7 @@ CLICOLOR_FORCE=1 NINJA_STATUS="" \
     --merge-install \
     --build-base "${build_base}" \
     --install-base "${install_base}" \
-    "${colcon_args[@]}"
+    "${colcon_args[@]}" \
+    --cmake-args -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
+
+touch "${repo_root}/compile_commands.json"

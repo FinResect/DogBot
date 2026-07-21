@@ -7,22 +7,24 @@ endif()
 
 find_package(ament_cmake REQUIRED)
 find_package(rclcpp REQUIRED)
+find_package(rclcpp_components REQUIRED)
+find_package(std_msgs REQUIRED)
 
-install(FILES config/nodes.yaml DESTINATION share/${PROJECT_NAME}/config)
+add_library(dogbot_core_lib SHARED
+  src/hardware/dogbot.cpp
+)
+ament_target_dependencies(dogbot_core_lib
+  rclcpp rclcpp_components std_msgs)
 
-file(GLOB_RECURSE SOURCES src/*.cpp)
-add_executable(dogbot_core_node ${SOURCES})
-target_link_libraries(dogbot_core_node rclcpp::rclcpp)
-install(TARGETS dogbot_core_node DESTINATION lib/${PROJECT_NAME})
+rclcpp_components_register_nodes(dogbot_core_lib "DogBot")
+
+install(TARGETS dogbot_core_lib
+  ARCHIVE DESTINATION lib
+  LIBRARY DESTINATION lib)
 
 if(BUILD_TESTING)
   find_package(ament_lint_auto REQUIRED)
-  # the following line skips the linter which checks for copyrights
-  # comment the line when a copyright and license is added to all source files
   set(ament_cmake_copyright_FOUND TRUE)
-  # the following line skips cpplint (only works in a git repo)
-  # comment the line when this package is in a git repo and when
-  # a copyright and license is added to all source files
   set(ament_cmake_cpplint_FOUND TRUE)
   ament_lint_auto_find_test_dependencies()
 endif()

@@ -7,4 +7,4 @@ source /opt/ros/humble/setup.bash
 cd "${DOGBOT_PATH}/ros2_ws" || exit 1
 source install/setup.bash
 
-exec "$@"
+ros2 launch dogbot_start start.launch.py

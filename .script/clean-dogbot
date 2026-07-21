@@ -10,4 +10,7 @@ fi
 sudo rm -rf -- \
     "${DOGBOT_PATH}/ros2_ws/build" \
     "${DOGBOT_PATH}/ros2_ws/install" \
-    "${DOGBOT_PATH}/ros2_ws/log"
+    "${DOGBOT_PATH}/ros2_ws/log" \
+    "${DOGBOT_PATH}/ros2_ws/build-cross" \
+    "${DOGBOT_PATH}/ros2_ws/install-cross" \
+    "${DOGBOT_PATH}/ros2_ws/log-cross"

@@ -92,9 +92,9 @@ export PKG_CONFIG_PATH=""
 
 cd "${workspace}"
 
-build_base=build
-install_base=install
-log_base=log
+build_base=build-cross
+install_base=install-cross
+log_base=log-cross
 
 CLICOLOR_FORCE=1 NINJA_STATUS="" \
     colcon \
