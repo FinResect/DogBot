@@ -1,0 +1,11 @@
+leg_controller:
+  ros__parameters:
+    thigh_length: 0.053
+    calf_length: 0.053
+    hip_offset: 0.752
+    L3: 0.04
+    L4: 0.03
+    L5: 0.045
+    servo_arm: 0.015
+    rocker_offset: 1.57
+    fork_branch: true
