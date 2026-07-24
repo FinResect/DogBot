@@ -62,7 +62,8 @@ public:
                         gait_type_ = parseGaitType(p.as_string());
                         gait_engine_.setGaitType(gait_type_);
                         need_ik_reset_ = true;
-                        RCLCPP_INFO(this->get_logger(), "Gait switched to %s", p.as_string().c_str());
+                        RCLCPP_INFO(
+                            this->get_logger(), "Gait switched to %s", p.as_string().c_str());
                     }
                 }
                 rcl_interfaces::msg::SetParametersResult result;
@@ -83,15 +84,13 @@ public:
         }
 
         sub_cmd_vel_ = this->create_subscription<geometry_msgs::msg::Twist>(
-            "cmd_vel", 10,
-            std::bind(&LegController::cmdVelCallback, this, std::placeholders::_1));
+            "cmd_vel", 10, std::bind(&LegController::cmdVelCallback, this, std::placeholders::_1));
 
         using namespace std::chrono_literals;
         timer_ = this->create_wall_timer(2ms, std::bind(&LegController::update, this));
 
         RCLCPP_INFO(
-            this->get_logger(),
-            "LegController ready (L1=%.4f L2=%.4f stance_z=%.3f T=%.2fs 500Hz)",
+            this->get_logger(), "LegController ready (L1=%.4f L2=%.4f stance_z=%.3f T=%.2fs 500Hz)",
             thigh_len, calf_len, stance_z, gait_engine_.cycleTime());
     }
 
@@ -108,7 +107,7 @@ private:
         if (gait_type_ == GaitType::Climb) {
             auto feet = gait_engine_.feet();
             for (int i = 0; i < 4; ++i) {
-                auto angles = solver_->solve(feet[i]);
+                auto angles      = solver_->solve(feet[i]);
                 current_hip_[i]  = angles.hip;
                 current_knee_[i] = angles.knee;
             }
@@ -121,7 +120,7 @@ private:
             if (need_ik_reset_) {
                 auto feet = gait_engine_.feet();
                 for (int i = 0; i < 4; ++i) {
-                    auto angles = solver_->solve(feet[i]);
+                    auto angles      = solver_->solve(feet[i]);
                     current_hip_[i]  = angles.hip;
                     current_knee_[i] = angles.knee;
                 }
@@ -131,7 +130,7 @@ private:
                 auto feet_vel = gait_engine_.feetVelocities();
                 for (int i = 0; i < 4; ++i) {
                     auto vel = solver_->solveVelocity(feet[i], feet_vel[i]);
-                    current_hip_[i]  += vel.hip  * dt_;
+                    current_hip_[i] += vel.hip * dt_;
                     current_knee_[i] += vel.knee * dt_;
                 }
             }
@@ -149,11 +148,21 @@ private:
     }
 
     static GaitType parseGaitType(const std::string& s) {
-        if (s == "trot") { return GaitType::Trot; }
-        if (s == "amble") { return GaitType::Amble; }
-        if (s == "walk") { return GaitType::Walk; }
-        if (s == "stand") { return GaitType::Stand; }
-        if (s == "climb") { return GaitType::Climb; }
+        if (s == "trot") {
+            return GaitType::Trot;
+        }
+        if (s == "amble") {
+            return GaitType::Amble;
+        }
+        if (s == "walk") {
+            return GaitType::Walk;
+        }
+        if (s == "stand") {
+            return GaitType::Stand;
+        }
+        if (s == "climb") {
+            return GaitType::Climb;
+        }
         return GaitType::Trot;
     }
 
@@ -161,9 +170,9 @@ private:
     GaitEngine gait_engine_;
     GaitType gait_type_ = GaitType::Trot;
 
-    double current_hip_[4]  = {};
-    double current_knee_[4] = {};
-    bool need_ik_reset_      = true;
+    double current_hip_[4]      = {};
+    double current_knee_[4]     = {};
+    bool need_ik_reset_         = true;
     static constexpr double dt_ = 0.002;
 
     rclcpp::Publisher<std_msgs::msg::Float64>::SharedPtr pub_hip_[4];

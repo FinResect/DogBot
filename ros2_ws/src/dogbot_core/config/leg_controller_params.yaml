@@ -1,8 +1,14 @@
 leg_controller:
   ros__parameters:
+<<<<<<< HEAD
     thigh_length: 0.08955 #大腿长度L1
     calf_length: 0.09054 #小腿长度L2
     hip_offset: 0.0 #0.752（髋关节角度偏置）
+=======
+    thigh_length: 0.08955
+    calf_length: 0.09054
+    hip_offset: 0.0 #0.752
+>>>>>>> 28517b8 (refactor(ZX30S):add limit set)
     L3: 0.0772
     L4: 0.02383
     L5: 0.075
