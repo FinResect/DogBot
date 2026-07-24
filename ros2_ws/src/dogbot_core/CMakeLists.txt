@@ -1,6 +1,9 @@
 cmake_minimum_required(VERSION 3.11)
 project(dogbot_core)
 
+set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
 if(CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
   add_compile_options(-Wall -Wextra -Wpedantic)
 endif()
@@ -27,6 +30,9 @@ rclcpp_components_register_nodes(dogbot_core_lib "DogBot" "dogbot_core::controll
 install(TARGETS dogbot_core_lib
   ARCHIVE DESTINATION lib
   LIBRARY DESTINATION lib)
+
+install(DIRECTORY config
+  DESTINATION share/${PROJECT_NAME})
 
 if(BUILD_TESTING)
   find_package(ament_lint_auto REQUIRED)
