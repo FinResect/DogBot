@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <iomanip>
 #include <sstream>
+#include <stdexcept>
 #include <string>
 
 namespace dogbot_core::hardware::device {
@@ -30,23 +31,58 @@ public:
             prefix + "/control_angle", 10, std::bind(&ZX30S::controlAngleCallback, this, _1));
     }
 
+    static constexpr uint16_t kPwmMin = 500;
+    static constexpr uint16_t kPwmMax = 2500;
+
     double clampAngle(double angle) const { return std::clamp(angle, angle_min_, angle_max_); }
+
+    uint16_t clampPWM(uint16_t pwm) const {
+        return static_cast<uint16_t>(std::clamp<int>(pwm, eff_min_, eff_max_));
+    }
 
     uint16_t angleToPWM(double angle) const {
         double clamped = clampAngle(angle);
-        return static_cast<uint16_t>(clamped / angle_max_deg_ * 2000.0 + 500.0);
+        return clampPWM(static_cast<uint16_t>(
+            clamped / angle_max_deg_ * 2000.0 + static_cast<double>(zero_pwm_)));
     }
 
     std::string generateCommand(uint16_t pwm, uint16_t time_ms = 0) const {
-        return makeCommand(formatPWM(pwm) + "T" + formatTime(time_ms));
+        return makeCommand(formatPWM(clampPWM(pwm)) + "T" + formatTime(time_ms));
     }
 
-    uint16_t getTargetPWM() const { return target_pwm_; }
+    std::string generateAngleCommand(uint16_t time_ms = 0) const {
+        return generateCommand(angleToPWM(control_angle_), time_ms);
+    }
+
+    uint16_t getTargetPWM() const { return angleToPWM(control_angle_); }
 
     int getServoId() const { return servo_id_; }
 
+    void setPWMLimits(uint16_t min_pwm, uint16_t max_pwm) {
+        const int eff_min = std::max<int>(kPwmMin, min_pwm);
+        const int eff_max = std::min<int>(kPwmMax, max_pwm);
+        if (eff_min >= eff_max) {
+            throw std::invalid_argument(
+                "PWM limits empty after intersection with [" + std::to_string(kPwmMin) + ","
+                + std::to_string(kPwmMax) + "]: requested [" + std::to_string(min_pwm) + ","
+                + std::to_string(max_pwm) + "]");
+        }
+        eff_min_  = static_cast<uint16_t>(eff_min);
+        eff_max_  = static_cast<uint16_t>(eff_max);
+        zero_pwm_ = eff_min_;
+    }
+
+    uint16_t getPWMMin() const { return eff_min_; }
+
+    uint16_t getPWMMax() const { return eff_max_; }
+
+    void setZeroPWM(uint16_t pwm) { zero_pwm_ = clampPWM(pwm); }
+
+    uint16_t getZeroPWM() const { return zero_pwm_; }
+
     double pwmToAngle(uint16_t pwm) const {
-        return static_cast<double>(pwm - 500) / 2000.0 * angle_max_deg_;
+        return (static_cast<double>(pwm) - static_cast<double>(zero_pwm_)) / 2000.0
+             * angle_max_deg_;
     }
 
     void publishAngle(double angle) {
@@ -127,9 +163,7 @@ public:
 
 private:
     void controlAngleCallback(const std_msgs::msg::Float64::SharedPtr msg) {
-        double clamped = clampAngle(msg->data);
-        target_pwm_    = angleToPWM(clamped);
-        publishAngle(clamped);
+        control_angle_ = msg->data;
     }
 
     std::string formatId() const {
@@ -164,6 +198,9 @@ private:
     double angle_min_     = 0.0;
     double angle_max_     = 270.0;
     double angle_max_deg_ = 270.0;
-    uint16_t target_pwm_  = 1500;
+    double control_angle_ = 0.0;
+    uint16_t zero_pwm_    = kPwmMin;
+    uint16_t eff_min_     = kPwmMin;
+    uint16_t eff_max_     = kPwmMax;
 };
 } // namespace dogbot_core::hardware::device

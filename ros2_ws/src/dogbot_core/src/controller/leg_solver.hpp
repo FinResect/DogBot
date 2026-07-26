@@ -20,10 +20,10 @@ public:
         : L1_(thigh)
         , L2_(calf)
         , hip_offset_(hip_offs)
-        , d_(L3)
-        , c_(L4)
-        , b_(L5)
         , a_(r)
+        , b_(L5)
+        , c_(L4)
+        , d_(L3)
         , delta_(delta)
         , fork_branch_(fork_branch) {}
 
@@ -34,14 +34,14 @@ public:
         double r_max = L1_ + L2_;
         r            = std::clamp(r, r_min, r_max);
 
-        double cos_knee = (r * r - L1_ * L1_ - L2_ * L2_) / (2.0 * L1_ * L2_);
-        cos_knee        = std::clamp(cos_knee, -1.0, 1.0);
+        double cos_knee        = (r * r - L1_ * L1_ - L2_ * L2_) / (2.0 * L1_ * L2_);
+        cos_knee               = std::clamp(cos_knee, -1.0, 1.0);
         double theta_knee_geom = std::acos(cos_knee);
 
-        double alpha      = std::atan2(foot.z(), foot.y());
-        double beta       = std::atan2(L2_ * std::sin(theta_knee_geom),
-                                       L1_ + L2_ * std::cos(theta_knee_geom));
-        double theta_hip  = alpha - beta + hip_offset_;
+        double alpha = std::atan2(foot.z(), foot.y());
+        double beta =
+            std::atan2(L2_ * std::sin(theta_knee_geom), L1_ + L2_ * std::cos(theta_knee_geom));
+        double theta_hip = alpha - beta + hip_offset_;
 
         double theta_knee_servo = servoAngleFromKnee(theta_knee_geom);
 
