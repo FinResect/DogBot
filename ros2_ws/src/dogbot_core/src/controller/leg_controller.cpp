@@ -1,3 +1,4 @@
+#include "controller/gait.hpp"
 #include "controller/leg_solver.hpp"
 
 #include <Eigen/Dense>
@@ -28,11 +29,26 @@ public:
         double delta     = this->declare_parameter("rocker_offset", 1.57);
         bool fork_branch = this->declare_parameter("fork_branch", true);
 
-        stance_y_    = this->declare_parameter("stance_y", 0.0);
-        stance_z_    = this->declare_parameter("stance_z", 0.13);
-        step_length_ = this->declare_parameter("step_length", 0.04);
-        step_height_ = this->declare_parameter("step_height", 0.03);
-        gait_period_ = this->declare_parameter("gait_period", 0.6);
+        GaitConfig gait_cfg;
+        gait_cfg.stance_y    = this->declare_parameter("stance_y", 0.0);
+        gait_cfg.stance_z    = this->declare_parameter("stance_z", 0.13);
+        gait_cfg.step_length = this->declare_parameter("step_length", 0.04);
+        gait_cfg.step_height = this->declare_parameter("step_height", 0.03);
+        gait_cfg.period      = this->declare_parameter("gait_period", 0.6);
+        gait_.setConfig(gait_cfg);
+
+        std::string mode_str = this->declare_parameter("gait_mode", std::string("trot"));
+        if (mode_str == "trot") {
+            mode_ = GaitMode::Trot;
+        } else if (mode_str == "amble") {
+            mode_ = GaitMode::Amble;
+        } else if (mode_str == "walk") {
+            mode_ = GaitMode::Walk;
+        } else if (mode_str == "stand") {
+            mode_ = GaitMode::Stand;
+        } else {
+            mode_ = GaitMode::Trot;
+        }
 
         solver_ = std::make_unique<LegSolver>(
             thigh_len, calf_len, hip_offs, L3, L4, L5, r_arm, delta, fork_branch);
@@ -55,13 +71,13 @@ public:
 
         RCLCPP_INFO(
             this->get_logger(),
-            "LegController ready (L1=%.4f L2=%.4f stance_z=%.3f step=%.3f/%.3f T=%.2fs 1000Hz)",
-            thigh_len, calf_len, stance_z_, step_length_, step_height_, gait_period_);
+            "LegController ready (L1=%.4f L2=%.4f stance_z=%.3f step=%.3f/%.3f T=%.2fs 500Hz)",
+            thigh_len, calf_len, gait_cfg.stance_z, gait_cfg.step_length, gait_cfg.step_height, gait_cfg.period);
     }
 
 private:
     void update() {
-        const auto feet = walk();
+        const auto feet = gait_.feet(mode_, t_);
         t_ += dt_;
 
         for (int i = 0; i < 4; ++i) {
@@ -77,43 +93,12 @@ private:
         }
     }
 
-    std::array<Eigen::Vector3d, 4> walk() {
-        std::array<Eigen::Vector3d, 4> foot;
-        // Trot: LF(0)+RB(2) phase 0; LB(1)+RF(3) phase 0.5
-        static constexpr double kPhase[4] = {0.0, 0.5, 0.0, 0.5};
-
-        const double period = std::max(gait_period_, 1e-3);
-        for (int i = 0; i < 4; ++i) {
-            double s = std::fmod(t_ / period + kPhase[i], 1.0);
-            if (s < 0.0) {
-                s += 1.0;
-            }
-
-            double y = stance_y_;
-            double z = stance_z_;
-            if (s < 0.5) {
-                const double u = 2.0 * s;
-                y              = stance_y_ + step_length_ * (2.0 * u - 1.0);
-                z              = stance_z_ + step_height_ * std::sin(std::numbers::pi * u);
-            } else {
-                const double v = 2.0 * (s - 0.5);
-                y              = stance_y_ + step_length_ * (1.0 - 2.0 * v);
-                z              = stance_z_;
-            }
-            foot[i] = Eigen::Vector3d(0.0, y, z);
-        }
-        return foot;
-    }
-
     void footCallback(const geometry_msgs::msg::Point::SharedPtr msg) { (void)msg; }
 
     std::unique_ptr<LegSolver> solver_;
 
-    double stance_y_            = 0.0;
-    double stance_z_            = -0.08;
-    double step_length_         = 0.02;
-    double step_height_         = 0.012;
-    double gait_period_         = 1.0;
+    Gait gait_;
+    GaitMode mode_              = GaitMode::Trot;
     double t_                   = 0.0;
     static constexpr double dt_ = 0.002;
 

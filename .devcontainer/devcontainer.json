@@ -19,7 +19,7 @@
     ],
 
     "containerEnv": {
-        "XDG_RUNTIME_DIR": "/tmp/runtime-root",
+        "XDG_RUNTIME_DIR": "/tmp",
         "DOGBOT_PATH": "/workspaces/DogBot"
     },
 
