@@ -1,0 +1,14 @@
+camera_node:
+  ros__parameters:
+    device: "/dev/video0"
+    width: 640
+    height: 480
+    fps: 30
+    fourcc: "YUYV"
+
+rtsp_stream_node:
+  ros__parameters:
+    enabled: true
+    port: 8554
+    mount_point: "/cam"
+    bitrate: 2000
