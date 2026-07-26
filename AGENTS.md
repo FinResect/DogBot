@@ -80,14 +80,18 @@ install_scripts=$base/lib/<package_name>
 | 文件 | 路径 | 职责 |
 |---|---|---|
 | `dogbot.cpp` | `dogbot_core/src/hardware/` | 仅做外设管理：串口初始化、舵机通信、20Hz PWM 定时发送 |
-| `leg_solver.hpp` | `dogbot_core/src/controller/` | 纯运动学解算：输入足端坐标，输出髋/膝关节角度 |
-| `leg_controller.cpp` | `dogbot_core/src/controller/` | 足端轨迹规划 + 步态生成：按不同轨迹方程计算足端轨迹，经 IK 映射后发布 topic |
+| `leg_solver.hpp` | `dogbot_core/src/controller/` | 纯运动学解算：输入足端坐标 (y,z)，经 4 连杆机构求解输出髋/膝关节角度 |
+| `leg_controller.cpp` | `dogbot_core/src/controller/` | ROS2 Node：500Hz 定时调用 gait + IK，发布 8 个舵机角度 topic |
+| `gait.hpp` | `dogbot_core/src/controller/` | 步态类（当前在用）：`GaitMode::Trot/Amble/Walk/Stand`，输出四足足端轨迹 |
+| `gait_config.hpp` | `dogbot_core/src/controller/` | 步态参数定义：`GaitType` 枚举、`GaitParams` 结构、`makeTrotParams()` 等工厂函数、腿布局常量 |
+| `gait_engine.hpp` | `dogbot_core/src/controller/` | 更完整的步态引擎：速度驱动的步幅计算，每腿相位偏移，尚未接入 leg_controller |
+| `trajectory.hpp` | `dogbot_core/src/controller/` | 单足轨迹函数 `stepTrajectory`：AEP/PEP 摆动相 + 支撑相模型，供 gait_engine 调用 |
 
 ### 步态与轨迹
 
-- `leg_controller.cpp` 中应包含不同轨迹方程来控制不同步态（Trot、Amble、Walk 等）
-- 不同 gait 使用对应 `.hpp` 类组织，每个步态类输出足端轨迹供 IK 消费
-- Python 旧版参考：`driver/puppy_control/puppy_control/puppy.py` 已有 Trot/Amble/Walk 实现
+- `leg_controller.cpp` 当前使用 `gait.hpp`（简单实现），通过参数 `gait_mode` 切换 Trot/Amble/Walk/Stand
+- 更完整的实现 `gait_engine.hpp` + `gait_config.hpp` + `trajectory.hpp` 已就绪，待接入
+- Python 旧版参考：`driver/puppy_control/puppy_control/puppy.py` 有原始 Trot/Amble/Walk 实现
 
 ### 交互方式
 

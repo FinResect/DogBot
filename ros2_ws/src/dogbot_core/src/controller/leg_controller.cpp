@@ -37,18 +37,20 @@ public:
         gait_cfg.period      = this->declare_parameter("gait_period", 0.6);
         gait_.setConfig(gait_cfg);
 
-        std::string mode_str = this->declare_parameter("gait_mode", std::string("trot"));
-        if (mode_str == "trot") {
-            mode_ = GaitMode::Trot;
-        } else if (mode_str == "amble") {
-            mode_ = GaitMode::Amble;
-        } else if (mode_str == "walk") {
-            mode_ = GaitMode::Walk;
-        } else if (mode_str == "stand") {
-            mode_ = GaitMode::Stand;
-        } else {
-            mode_ = GaitMode::Trot;
-        }
+        mode_ = parseGaitMode(this->declare_parameter("gait_mode", std::string("trot")));
+
+        param_cb_ = this->add_on_set_parameters_callback(
+            [this](const std::vector<rclcpp::Parameter>& params) {
+                for (const auto& p : params) {
+                    if (p.get_name() == "gait_mode") {
+                        mode_ = parseGaitMode(p.as_string());
+                        RCLCPP_INFO(this->get_logger(), "Gait switched to %s", p.as_string().c_str());
+                    }
+                }
+                rcl_interfaces::msg::SetParametersResult result;
+                result.successful = true;
+                return result;
+            });
 
         solver_ = std::make_unique<LegSolver>(
             thigh_len, calf_len, hip_offs, L3, L4, L5, r_arm, delta, fork_branch);
@@ -95,6 +97,14 @@ private:
 
     void footCallback(const geometry_msgs::msg::Point::SharedPtr msg) { (void)msg; }
 
+    static GaitMode parseGaitMode(const std::string& s) {
+        if (s == "trot") { return GaitMode::Trot; }
+        if (s == "amble") { return GaitMode::Amble; }
+        if (s == "walk") { return GaitMode::Walk; }
+        if (s == "stand") { return GaitMode::Stand; }
+        return GaitMode::Trot;
+    }
+
     std::unique_ptr<LegSolver> solver_;
 
     Gait gait_;
@@ -106,6 +116,7 @@ private:
     rclcpp::Publisher<std_msgs::msg::Float64>::SharedPtr pub_knee_[4];
     rclcpp::Subscription<geometry_msgs::msg::Point>::SharedPtr sub_foot_;
     rclcpp::TimerBase::SharedPtr timer_;
+    rclcpp::node_interfaces::OnSetParametersCallbackHandle::SharedPtr param_cb_;
 };
 
 } // namespace dogbot_core::controller
