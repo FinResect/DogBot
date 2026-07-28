@@ -58,6 +58,18 @@ def generate_launch_description():
                 name='camera',
                 parameters=[camera_params],
             ),
+            ComposableNode(
+                package='dogbot_core', 
+                plugin='dogbot_core::vision::FollowingNode',
+                name='following', 
+                parameters=[camera_params],
+            ),
+            ComposableNode(
+                package='dogbot_core',
+                plugin='dogbot_core::vision::ColorDetectNode',
+                name='color_detect',
+                parameters=[camera_params],
+            )
         ],
     )
 
