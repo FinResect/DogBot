@@ -1,0 +1,40 @@
+camera_node:
+  ros__parameters:
+    device: "/dev/video0"
+    width: 640
+    height: 480
+    fps: 30
+    fourcc: "YUYV"
+
+rtsp_stream_node:
+  ros__parameters:
+    enabled: true
+    port: 8554
+    mount_point: "/cam"
+    bitrate: 2000
+
+following_node:
+  ros__parameters:
+    canny_low_threshold: 50
+    canny_high_threshold: 150
+    gaussian_kernel_size: 5
+    roi_bottom_ratio: 0.6
+    lookahead_distance: 100
+
+color_detect_node:
+  ros__parameters:
+    min_area: 500
+    hsv_red_lower1: [0, 120, 70]
+    hsv_red_upper1: [10, 255, 255]
+    hsv_red_lower2: [170, 120, 70]
+    hsv_red_upper2: [179, 255, 255]
+    hsv_blue_lower1: [100, 120, 70]
+    hsv_blue_upper1: [130, 255, 255]
+    hsv_green_lower1: [40, 50, 50]
+    hsv_green_upper1: [80, 255, 255]
+    hsv_brown_lower1: [10, 50, 30]
+    hsv_brown_upper1: [25, 200, 150]
+    hsv_purple_lower1: [130, 50, 50]
+    hsv_purple_upper1: [160, 255, 255]
+    hsv_orange_lower1: [5, 120, 70]
+    hsv_orange_upper1: [18, 255, 255]

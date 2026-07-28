@@ -9,6 +9,7 @@
 #include "device/ZX30S.hpp"
 #include "serial/serial.hpp"
 
+namespace dogbot_core::hardware {
 class DogBot : public rclcpp::Node {
 public:
     explicit DogBot(const rclcpp::NodeOptions& options)
@@ -77,5 +78,6 @@ private:
     dogbot_core::hardware::device::ZX30S hip_[4];
     rclcpp::TimerBase::SharedPtr timer_;
 };
+} // namespace dogbot_core::hardware
 
-RCLCPP_COMPONENTS_REGISTER_NODE(DogBot)
+RCLCPP_COMPONENTS_REGISTER_NODE(dogbot_core::hardware::DogBot)

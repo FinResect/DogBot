@@ -12,9 +12,9 @@ on:
       - ros2_ws/toolchain.cmake
 
 env:
-  REGISTRY_IMAGE_BASE: qzhhhi/dogbot-base
-  REGISTRY_IMAGE_DEVELOP: qzhhhi/dogbot-develop
-  REGISTRY_IMAGE_RUNTIME: qzhhhi/dogbot-runtime
+  REGISTRY_IMAGE_BASE: dogbot-base
+  REGISTRY_IMAGE_DEVELOP: dogbot-develop
+  REGISTRY_IMAGE_RUNTIME: dogbot-runtime
 
 jobs:
   build_base:

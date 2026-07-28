@@ -65,7 +65,7 @@ private:
         t_ += dt_;
 
         for (int i = 0; i < 4; ++i) {
-            const auto angles = solver_->solve(feet[i]);
+            const auto angles = solver_->solve({0, 0, 0});
 
             std_msgs::msg::Float64 hip_msg;
             std_msgs::msg::Float64 knee_msg;
