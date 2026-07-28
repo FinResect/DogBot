@@ -57,4 +57,16 @@ inline const std::array<const char*, kLegCount> kLegNames{
 inline const std::array<const char*, kLegCount> kJointSuffixes{
     "hip", "knee"};
 
+struct LegPosition {
+    double px;
+    double py;
+};
+
+inline const std::array<LegPosition, kLegCount> kLegBodyPositions{{
+    { 0.08,  0.05},
+    {-0.08,  0.05},
+    {-0.08, -0.05},
+    { 0.08, -0.05},
+}};
+
 } // namespace dogbot_core::controller

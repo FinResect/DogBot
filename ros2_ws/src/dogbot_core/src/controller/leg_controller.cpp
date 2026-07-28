@@ -1,10 +1,11 @@
-#include "controller/gait.hpp"
+#include "controller/gait_config.hpp"
+#include "controller/gait_engine.hpp"
 #include "controller/leg_solver.hpp"
 
 #include <Eigen/Dense>
 #include <array>
 #include <cmath>
-#include <geometry_msgs/msg/point.hpp>
+#include <geometry_msgs/msg/twist.hpp>
 #include <memory>
 #include <numbers>
 #include <rclcpp/rclcpp.hpp>
@@ -29,21 +30,30 @@ public:
         double delta     = this->declare_parameter("rocker_offset", 1.57);
         bool fork_branch = this->declare_parameter("fork_branch", true);
 
-        GaitConfig gait_cfg;
-        gait_cfg.stance_y    = this->declare_parameter("stance_y", 0.0);
-        gait_cfg.stance_z    = this->declare_parameter("stance_z", 0.13);
-        gait_cfg.step_length = this->declare_parameter("step_length", 0.04);
-        gait_cfg.step_height = this->declare_parameter("step_height", 0.03);
-        gait_cfg.period      = this->declare_parameter("gait_period", 0.6);
-        gait_.setConfig(gait_cfg);
+        double step_height = this->declare_parameter("step_height", 0.03);
+        double gait_period = this->declare_parameter("gait_period", 0.6);
 
-        mode_ = parseGaitMode(this->declare_parameter("gait_mode", std::string("trot")));
+        GaitParams gait_params    = makeTrotParams(gait_period);
+        gait_params.z_clearance   = step_height;
+        gait_type_ = parseGaitType(this->declare_parameter("gait_mode", std::string("trot")));
+
+        double stance_y = this->declare_parameter("stance_y", 0.0);
+        double stance_z = this->declare_parameter("stance_z", 0.13);
+        std::array<LegState, kLegCount> legs{};
+        for (auto& leg : legs) {
+            leg.base_y   = stance_y;
+            leg.z_stance = stance_z;
+        }
+
+        gait_engine_.configure(gait_params, legs);
+        gait_engine_.setGaitType(gait_type_);
 
         param_cb_ = this->add_on_set_parameters_callback(
             [this](const std::vector<rclcpp::Parameter>& params) {
                 for (const auto& p : params) {
                     if (p.get_name() == "gait_mode") {
-                        mode_ = parseGaitMode(p.as_string());
+                        gait_type_ = parseGaitType(p.as_string());
+                        gait_engine_.setGaitType(gait_type_);
                         RCLCPP_INFO(this->get_logger(), "Gait switched to %s", p.as_string().c_str());
                     }
                 }
@@ -64,57 +74,71 @@ public:
                 std::string(kLegNames[i]) + "_knee/control_angle", 10);
         }
 
-        sub_foot_ = this->create_subscription<geometry_msgs::msg::Point>(
-            "foot_target", 10,
-            std::bind(&LegController::footCallback, this, std::placeholders::_1));
+        sub_cmd_vel_ = this->create_subscription<geometry_msgs::msg::Twist>(
+            "cmd_vel", 10,
+            std::bind(&LegController::cmdVelCallback, this, std::placeholders::_1));
 
         using namespace std::chrono_literals;
         timer_ = this->create_wall_timer(2ms, std::bind(&LegController::update, this));
 
         RCLCPP_INFO(
             this->get_logger(),
-            "LegController ready (L1=%.4f L2=%.4f stance_z=%.3f step=%.3f/%.3f T=%.2fs 500Hz)",
-            thigh_len, calf_len, gait_cfg.stance_z, gait_cfg.step_length, gait_cfg.step_height, gait_cfg.period);
+            "LegController ready (L1=%.4f L2=%.4f stance_z=%.3f T=%.2fs 500Hz)",
+            thigh_len, calf_len, stance_z, gait_engine_.cycleTime());
     }
 
 private:
+    void cmdVelCallback(const geometry_msgs::msg::Twist::SharedPtr msg) {
+        gait_engine_.setTargetTwist(msg->linear.x, msg->angular.z);
+    }
+
     void update() {
-        const auto feet = gait_.feet(mode_, t_);
-        t_ += dt_;
+        gait_engine_.step(dt_);
+        auto feet     = gait_engine_.feet();
+        auto feet_vel = gait_engine_.feetVelocities();
 
         for (int i = 0; i < 4; ++i) {
-            const auto angles = solver_->solve(feet[i]);
+            if (first_update_) {
+                auto angles = solver_->solve(feet[i]);
+                current_hip_[i]  = angles.hip;
+                current_knee_[i] = angles.knee;
+            } else {
+                auto vel = solver_->solveVelocity(feet[i], feet_vel[i]);
+                current_hip_[i]  += vel.hip  * dt_;
+                current_knee_[i] += vel.knee * dt_;
+            }
 
             std_msgs::msg::Float64 hip_msg;
             std_msgs::msg::Float64 knee_msg;
-            hip_msg.data  = angles.hip * 180.0 / std::numbers::pi;
-            knee_msg.data = angles.knee * 180.0 / std::numbers::pi;
+            hip_msg.data  = current_hip_[i] * 180.0 / std::numbers::pi;
+            knee_msg.data = current_knee_[i] * 180.0 / std::numbers::pi;
 
             pub_hip_[i]->publish(hip_msg);
             pub_knee_[i]->publish(knee_msg);
         }
+        first_update_ = false;
     }
 
-    void footCallback(const geometry_msgs::msg::Point::SharedPtr msg) { (void)msg; }
-
-    static GaitMode parseGaitMode(const std::string& s) {
-        if (s == "trot") { return GaitMode::Trot; }
-        if (s == "amble") { return GaitMode::Amble; }
-        if (s == "walk") { return GaitMode::Walk; }
-        if (s == "stand") { return GaitMode::Stand; }
-        return GaitMode::Trot;
+    static GaitType parseGaitType(const std::string& s) {
+        if (s == "trot") { return GaitType::Trot; }
+        if (s == "amble") { return GaitType::Amble; }
+        if (s == "walk") { return GaitType::Walk; }
+        if (s == "stand") { return GaitType::Stand; }
+        return GaitType::Trot;
     }
 
     std::unique_ptr<LegSolver> solver_;
+    GaitEngine gait_engine_;
+    GaitType gait_type_ = GaitType::Trot;
 
-    Gait gait_;
-    GaitMode mode_              = GaitMode::Trot;
-    double t_                   = 0.0;
+    double current_hip_[4]  = {};
+    double current_knee_[4] = {};
+    bool first_update_       = true;
     static constexpr double dt_ = 0.002;
 
     rclcpp::Publisher<std_msgs::msg::Float64>::SharedPtr pub_hip_[4];
     rclcpp::Publisher<std_msgs::msg::Float64>::SharedPtr pub_knee_[4];
-    rclcpp::Subscription<geometry_msgs::msg::Point>::SharedPtr sub_foot_;
+    rclcpp::Subscription<geometry_msgs::msg::Twist>::SharedPtr sub_cmd_vel_;
     rclcpp::TimerBase::SharedPtr timer_;
     rclcpp::node_interfaces::OnSetParametersCallbackHandle::SharedPtr param_cb_;
 };

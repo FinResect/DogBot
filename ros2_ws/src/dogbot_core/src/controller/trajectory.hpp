@@ -28,4 +28,22 @@ inline Eigen::Vector3d stepTrajectory(
     return {0.0, y, z_stance};
 }
 
+inline Eigen::Vector3d stepTrajectoryVelocity(
+    double phase,
+    double swing_ratio,
+    double stride,
+    double z_clearance,
+    double cycle_time)
+{
+    if (phase < swing_ratio) {
+        double t = phase / swing_ratio;
+        double vy = stride / (swing_ratio * cycle_time);
+        double vz = -z_clearance * M_PI * std::cos(M_PI * t) / (swing_ratio * cycle_time);
+        return {0.0, vy, vz};
+    }
+
+    double vy = -stride / ((1.0 - swing_ratio) * cycle_time);
+    return {0.0, vy, 0.0};
+}
+
 } // namespace dogbot_core::controller
