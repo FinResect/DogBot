@@ -27,6 +27,8 @@ add_library(dogbot_core_lib SHARED
   src/controller/leg_controller.cpp
   src/vision/camera/camera_node.cpp
   src/vision/camera/rtsp_stream_node.cpp
+  src/vision/following.cpp
+  src/vision/color_detect.cpp
 )
 target_include_directories(dogbot_core_lib PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src>
@@ -46,7 +48,9 @@ rclcpp_components_register_nodes(dogbot_core_lib
   "dogbot_core::hardware::DogBot"
   "dogbot_core::controller::LegController"
   "dogbot_core::camera::CameraNode"
-  "dogbot_core::camera::RtspStreamNode")
+  "dogbot_core::camera::RtspStreamNode"
+  "dogbot_core::vision::FollowingNode"
+  "dogbot_core::vision::ColorDetectNode")
 
 install(TARGETS dogbot_core_lib
   ARCHIVE DESTINATION lib
