@@ -43,7 +43,7 @@ target_link_libraries(dogbot_core_lib
   ${GST_RTSP_LIBRARIES})
 
 rclcpp_components_register_nodes(dogbot_core_lib
-  "DogBot"
+  "dogbot_core::hardware::DogBot"
   "dogbot_core::controller::LegController"
   "dogbot_core::camera::CameraNode"
   "dogbot_core::camera::RtspStreamNode")
