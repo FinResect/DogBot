@@ -81,9 +81,9 @@ ros2 launch dogbot_start start.launch.py
 宿主机拉流（容器用 `--network=host`，直接访问 localhost）：
 
 ```bash
-ffplay rtsp://localhost:8554/cam
+ffplay rtsp://dogbot.local:8554/cam
 # 或
-vlc rtsp://localhost:8554/cam
+vlc rtsp://dogbot.local:8554/cam
 ```
 
 在浏览器中用 MJPEG 查看（需额外启动 web_video_server 或等价 HTTP bridge）。

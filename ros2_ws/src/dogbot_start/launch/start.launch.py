@@ -37,7 +37,7 @@ def generate_launch_description():
         composable_node_descriptions=[
             ComposableNode(
                 package='dogbot_core',
-                plugin='DogBot',
+                plugin='dogbot_core::hardware::DogBot',
                 name='dogbot',
             ),
             ComposableNode(

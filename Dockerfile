@@ -30,6 +30,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ros-humble-pcl-conversions \
     ros-humble-pcl-msgs \
     ros-humble-foxglove-bridge \
+    gstreamer1.0-plugins-good \
+    gstreamer1.0-plugins-ugly \
+    gstreamer1.0-tools\
+    libgstrtspserver-1.0-0 \
     && case "${TARGETARCH}" in \
         amd64) apt-get install -y --no-install-recommends \
             libgoogle-glog-dev \
@@ -65,6 +69,9 @@ ARG TARGETARCH
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential gcc-12 g++-12 \
     cmake ninja-build \
+    libgstrtspserver-1.0-dev \
+    libgstreamer1.0-dev \
+    libgstreamer-plugins-base1.0-dev\
     openssh-client \
     lsb-release software-properties-common gnupg sudo \
     python3-colorama python3-dpkt && \
@@ -73,10 +80,16 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/* /tmp/*
 
-RUN curl -fsSL https://deb.nodesource.com/setup_24.x | bash - && \
-    apt-get install -y --no-install-recommends nodejs && \
-    apt-get clean && \
-    rm -rf /var/lib/apt/lists/* /tmp/*
+ARG NODE_VERSION=24.18.0
+RUN case "${TARGETARCH}" in \
+        amd64) node_arch=x64 ;; \
+        arm64) node_arch=arm64 ;; \
+        *) echo "Unsupported TARGETARCH: ${TARGETARCH}" >&2; exit 1 ;; \
+    esac && \
+    mkdir -p /usr/local/lib/nodejs && \
+    curl -fsSL "https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-linux-${node_arch}.tar.xz" \
+        | tar -xJ -C /usr/local/lib/nodejs --strip-components=1
+ENV PATH="/usr/local/lib/nodejs/bin:${PATH}"
 
 ARG LLVM_VERSION=18
 RUN mkdir -p /etc/apt/keyrings && \
@@ -164,6 +177,9 @@ FROM --platform=linux/arm64 ${SYSROOT_IMAGE_ARM64} AS dogbot-sysroot-arm64
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libboost-dev \
     libboost-system-dev \
+    libgstrtspserver-1.0-dev \
+    libgstreamer1.0-dev \
+    libgstreamer-plugins-base1.0-dev\
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
 FROM dogbot-develop AS dogbot-develop-full
@@ -192,9 +208,8 @@ RUN --mount=from=dogbot-sysroot-arm64,target=/mnt/sysroot-arm64,readonly \
         --exclude='./tmp/*' \
         -C /mnt/sysroot-arm64 -cf - . | tar -C /opt/sysroots/arm64 -xf -
 
-COPY .script/fix-sysroot-cross-paths /usr/local/bin/fix-sysroot-cross-paths
-RUN chmod +x /usr/local/bin/fix-sysroot-cross-paths && \
-    fix-sysroot-cross-paths /opt/sysroots/arm64
+RUN find /opt/sysroots/arm64/opt/ros -name '*.cmake' \
+    -exec sed -i 's|\([";: (]\)/usr/lib|\1/opt/sysroots/arm64/usr/lib|g' {} +
 
 WORKDIR /home/ubuntu
 ENV USER=ubuntu
