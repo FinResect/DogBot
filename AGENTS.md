@@ -81,16 +81,16 @@ install_scripts=$base/lib/<package_name>
 |---|---|---|
 | `dogbot.cpp` | `dogbot_core/src/hardware/` | 仅做外设管理：串口初始化、舵机通信、20Hz PWM 定时发送 |
 | `leg_solver.hpp` | `dogbot_core/src/controller/` | 纯运动学解算：输入足端坐标 (y,z)，经 4 连杆机构求解输出髋/膝关节角度 |
-| `leg_controller.cpp` | `dogbot_core/src/controller/` | ROS2 Node：500Hz 定时调用 gait + IK，发布 8 个舵机角度 topic |
-| `gait.hpp` | `dogbot_core/src/controller/` | 步态类（当前在用）：`GaitMode::Trot/Amble/Walk/Stand`，输出四足足端轨迹 |
-| `gait_config.hpp` | `dogbot_core/src/controller/` | 步态参数定义：`GaitType` 枚举、`GaitParams` 结构、`makeTrotParams()` 等工厂函数、腿布局常量 |
-| `gait_engine.hpp` | `dogbot_core/src/controller/` | 更完整的步态引擎：速度驱动的步幅计算，每腿相位偏移，尚未接入 leg_controller |
+| `leg_controller.cpp` | `dogbot_core/src/controller/` | ROS2 Node：500Hz 定时调用 gait + IK，发布 8 个舵机角度 topic。支持 Climb 爬楼梯模式（纯位置 IK）和普通步态（速度积分） |
+| `gait_config.hpp` | `dogbot_core/src/controller/` | 步态参数定义：`GaitType` 枚举（含 `Climb`）、`GaitParams`/`ClimbConfig` 结构、`makeTrotParams()` 等工厂函数、腿布局常量 |
+| `gait_engine.hpp` | `dogbot_core/src/controller/` | 步态引擎：速度驱动的步幅计算，每腿相位偏移，含 `Climb` 爬楼梯状态机（6 阶段 × N 步攀爬） |
 | `trajectory.hpp` | `dogbot_core/src/controller/` | 单足轨迹函数 `stepTrajectory`：AEP/PEP 摆动相 + 支撑相模型，供 gait_engine 调用 |
 
 ### 步态与轨迹
 
-- `leg_controller.cpp` 当前使用 `gait.hpp`（简单实现），通过参数 `gait_mode` 切换 Trot/Amble/Walk/Stand
-- 更完整的实现 `gait_engine.hpp` + `gait_config.hpp` + `trajectory.hpp` 已就绪，待接入
+- `leg_controller.cpp` 当前使用 `gait_engine.hpp`，通过参数 `gait_mode` 切换 Stand/Trot/Amble/Walk/Climb
+- `Climb` 模式使用纯位置 IK（`LegSolver::solve`），6 阶段顺序攀爬（RF→LF→Shift→RB→LB→Settle），始终 3 足支撑
+- `Stand/Trot/Amble/Walk` 模式使用速度积分（`LegSolver::solveVelocity` + `angle += ω·dt`）
 - Python 旧版参考：`driver/puppy_control/puppy_control/puppy.py` 有原始 Trot/Amble/Walk 实现
 
 ### 交互方式

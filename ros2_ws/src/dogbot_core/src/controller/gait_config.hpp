@@ -5,7 +5,7 @@
 
 namespace dogbot_core::controller {
 
-enum class GaitType { Stand, Trot, Amble, Walk };
+enum class GaitType { Stand, Trot, Amble, Walk, Climb };
 
 struct GaitParams {
     double overlap_time;
@@ -39,12 +39,20 @@ inline GaitParams makeSlowConfig() {
     return {0.40, 0.30, 0.26, 0.04};
 }
 
+struct ClimbConfig {
+    double step_height = 0.03;
+    double reach       = 0.04;
+    double phase_time  = 0.8;
+    int steps          = 1;
+};
+
 inline const char* gaitName(GaitType type) {
     switch (type) {
     case GaitType::Stand: return "Stand";
     case GaitType::Trot:  return "Trot";
     case GaitType::Amble: return "Amble";
     case GaitType::Walk:  return "Walk";
+    case GaitType::Climb: return "Climb";
     }
     return "Unknown";
 }

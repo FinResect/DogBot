@@ -33,8 +33,8 @@ public:
         double step_height = this->declare_parameter("step_height", 0.03);
         double gait_period = this->declare_parameter("gait_period", 0.6);
 
-        GaitParams gait_params    = makeTrotParams(gait_period);
-        gait_params.z_clearance   = step_height;
+        GaitParams gait_params  = makeTrotParams(gait_period);
+        gait_params.z_clearance = step_height;
         gait_type_ = parseGaitType(this->declare_parameter("gait_mode", std::string("trot")));
 
         double stance_y = this->declare_parameter("stance_y", 0.0);
@@ -45,7 +45,14 @@ public:
             leg.z_stance = stance_z;
         }
 
+        ClimbConfig climb_cfg;
+        climb_cfg.step_height = this->declare_parameter("climb_step_height", 0.03);
+        climb_cfg.reach       = this->declare_parameter("climb_reach", 0.04);
+        climb_cfg.phase_time  = this->declare_parameter("climb_phase_time", 0.8);
+        climb_cfg.steps       = this->declare_parameter("climb_steps", 1);
+
         gait_engine_.configure(gait_params, legs);
+        gait_engine_.configureClimb(climb_cfg);
         gait_engine_.setGaitType(gait_type_);
 
         param_cb_ = this->add_on_set_parameters_callback(
@@ -54,6 +61,7 @@ public:
                     if (p.get_name() == "gait_mode") {
                         gait_type_ = parseGaitType(p.as_string());
                         gait_engine_.setGaitType(gait_type_);
+                        need_ik_reset_ = true;
                         RCLCPP_INFO(this->get_logger(), "Gait switched to %s", p.as_string().c_str());
                     }
                 }
@@ -89,25 +97,47 @@ public:
 
 private:
     void cmdVelCallback(const geometry_msgs::msg::Twist::SharedPtr msg) {
-        gait_engine_.setTargetTwist(msg->linear.x, msg->angular.z);
+        if (gait_type_ != GaitType::Climb) {
+            gait_engine_.setTargetTwist(msg->linear.x, msg->angular.z);
+        }
     }
 
     void update() {
         gait_engine_.step(dt_);
-        auto feet     = gait_engine_.feet();
-        auto feet_vel = gait_engine_.feetVelocities();
 
-        for (int i = 0; i < 4; ++i) {
-            if (first_update_) {
+        if (gait_type_ == GaitType::Climb) {
+            auto feet = gait_engine_.feet();
+            for (int i = 0; i < 4; ++i) {
                 auto angles = solver_->solve(feet[i]);
                 current_hip_[i]  = angles.hip;
                 current_knee_[i] = angles.knee;
-            } else {
-                auto vel = solver_->solveVelocity(feet[i], feet_vel[i]);
-                current_hip_[i]  += vel.hip  * dt_;
-                current_knee_[i] += vel.knee * dt_;
             }
+            if (gait_engine_.climbDone()) {
+                gait_type_ = GaitType::Stand;
+                gait_engine_.setGaitType(gait_type_);
+                RCLCPP_INFO(this->get_logger(), "Climb completed, switched to Stand");
+            }
+        } else {
+            if (need_ik_reset_) {
+                auto feet = gait_engine_.feet();
+                for (int i = 0; i < 4; ++i) {
+                    auto angles = solver_->solve(feet[i]);
+                    current_hip_[i]  = angles.hip;
+                    current_knee_[i] = angles.knee;
+                }
+                need_ik_reset_ = false;
+            } else {
+                auto feet     = gait_engine_.feet();
+                auto feet_vel = gait_engine_.feetVelocities();
+                for (int i = 0; i < 4; ++i) {
+                    auto vel = solver_->solveVelocity(feet[i], feet_vel[i]);
+                    current_hip_[i]  += vel.hip  * dt_;
+                    current_knee_[i] += vel.knee * dt_;
+                }
+            }
+        }
 
+        for (int i = 0; i < 4; ++i) {
             std_msgs::msg::Float64 hip_msg;
             std_msgs::msg::Float64 knee_msg;
             hip_msg.data  = current_hip_[i] * 180.0 / std::numbers::pi;
@@ -116,7 +146,6 @@ private:
             pub_hip_[i]->publish(hip_msg);
             pub_knee_[i]->publish(knee_msg);
         }
-        first_update_ = false;
     }
 
     static GaitType parseGaitType(const std::string& s) {
@@ -124,6 +153,7 @@ private:
         if (s == "amble") { return GaitType::Amble; }
         if (s == "walk") { return GaitType::Walk; }
         if (s == "stand") { return GaitType::Stand; }
+        if (s == "climb") { return GaitType::Climb; }
         return GaitType::Trot;
     }
 
@@ -133,7 +163,7 @@ private:
 
     double current_hip_[4]  = {};
     double current_knee_[4] = {};
-    bool first_update_       = true;
+    bool need_ik_reset_      = true;
     static constexpr double dt_ = 0.002;
 
     rclcpp::Publisher<std_msgs::msg::Float64>::SharedPtr pub_hip_[4];
