@@ -1,26 +1,16 @@
 leg_controller:
   ros__parameters:
-<<<<<<< HEAD
-    thigh_length: 0.08955 #大腿长度L1
-    calf_length: 0.09054 #小腿长度L2
-    hip_offset: 0.0 #0.752（髋关节角度偏置）
-=======
     thigh_length: 0.08955
     calf_length: 0.09054
     hip_offset: 0.0 #0.752
->>>>>>> 28517b8 (refactor(ZX30S):add limit set)
     L3: 0.0772
     L4: 0.02383
     L5: 0.075
     servo_arm: 0.02355
     rocker_offset: -2.70
     fork_branch: true
-    gait_period: 0.6 #一个完整步态周期的时间
-    step_height: 0.03 #普通步态中的抬腿高度
-    gait_mode: trot #步态模式：stand/trot/amble/walk/climb
-    stance_y: 0.0 #站立时足端在身体前后方向的落点偏置
-    stance_z: 0.13 #站立时足端距离髋关节的垂直距离（越大=腿越伸展向下）
-    climb_step_height: 0.03 #每层台阶的高度（单位m）
-    climb_reach: 0.04 #攀爬时每条腿向前伸的距离（确保踩到台阶面上）
-    climb_phase_time: 0.8 #每个攀爬阶段（单条腿或身体移动）的耗时
-    climb_steps: 1 #连续攀爬台阶的层数（这里的1表示爬一层30mm台阶）
+    stance_y: 0.0
+    stance_z: 0.13
+    step_length: 0.04
+    step_height: 0.03 
+    gait_period: 0.6

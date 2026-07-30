@@ -12,11 +12,6 @@ struct JointAngles {
     double knee;
 };
 
-struct JointVelocities {
-    double hip;
-    double knee;
-};
-
 class LegSolver {
 public:
     LegSolver(
@@ -53,42 +48,6 @@ public:
         return {theta_hip, theta_knee_servo};
     }
 
-    JointVelocities solveVelocity(const Eigen::Vector3d& foot, const Eigen::Vector3d& foot_vel) const {
-        double r = std::sqrt(foot.y() * foot.y() + foot.z() * foot.z());
-        double r_min = std::abs(L1_ - L2_);
-        double r_max = L1_ + L2_;
-        r            = std::clamp(r, r_min, r_max);
-
-        double cos_knee = (r * r - L1_ * L1_ - L2_ * L2_) / (2.0 * L1_ * L2_);
-        cos_knee        = std::clamp(cos_knee, -1.0, 1.0);
-        double th_k     = std::acos(cos_knee);
-
-        double alpha = std::atan2(foot.z(), foot.y());
-        double beta =
-            std::atan2(L2_ * std::sin(th_k), L1_ + L2_ * std::cos(th_k));
-        double th_h = alpha - beta;
-
-        double vy = foot_vel.y();
-        double vz = foot_vel.z();
-
-        double s1  = std::sin(th_h);
-        double c1  = std::cos(th_h);
-        double s12 = std::sin(th_h + th_k);
-        double c12 = std::cos(th_h + th_k);
-
-        double detJ = L1_ * L2_ * std::sin(th_k);
-        constexpr double kEp = 1e-8;
-        if (std::abs(detJ) < kEp) {
-            return {0.0, 0.0};
-        }
-
-        double wh = (c12 * vy + s12 * vz) * L2_ / detJ;
-        double wk = (-(L1_ * c1 + L2_ * c12) * vy - (L1_ * s1 + L2_ * s12) * vz) / detJ;
-
-        double ratio = dServo_dKnee(th_k);
-        return {wh, wk * ratio};
-    }
-
 private:
     double servoAngleFromKnee(double knee_geom) const {
         double psi = knee_geom + delta_;
@@ -112,22 +71,6 @@ private:
     double K1() const { return d_ / c_; }
     double K2() const { return d_ / a_; }
     double K3() const { return (a_ * a_ - b_ * b_ + c_ * c_ + d_ * d_) / (2.0 * a_ * c_); }
-
-    double dServo_dKnee(double knee_geom) const {
-        double psi = knee_geom + delta_;
-        double phi = servoAngleFromKnee(knee_geom);
-
-        double num_y = b_ * std::sin(psi) - a_ * std::sin(phi);
-        double num_x = d_ + b_ * std::cos(psi) - a_ * std::cos(phi);
-        double th3   = std::atan2(num_y, num_x);
-
-        double sin_3_phi = std::sin(th3 - phi);
-        if (std::abs(sin_3_phi) < 1e-12) {
-            return 0.0;
-        }
-
-        return (b_ / a_) * std::sin(th3 - psi) / sin_3_phi;
-    }
 
     double L1_, L2_, hip_offset_;
     double a_, b_, c_, d_, delta_;
