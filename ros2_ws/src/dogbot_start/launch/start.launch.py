@@ -32,6 +32,13 @@ def generate_launch_description():
         output='screen',
     )
 
+    vision_container = Node(
+        package='rclcpp_components',
+        executable='component_container_mt',
+        name='vision_container',
+        output='screen',
+    )
+
     load_dogbot = LoadComposableNodes(
         target_container='dogbot_container',
         composable_node_descriptions=[
@@ -50,7 +57,7 @@ def generate_launch_description():
     )
 
     load_camera = LoadComposableNodes(
-        target_container='dogbot_container',
+        target_container='vision_container',
         composable_node_descriptions=[
             ComposableNode(
                 package='dogbot_core',
@@ -73,11 +80,11 @@ def generate_launch_description():
         ],
     )
 
-    actions = [container, load_dogbot, load_camera]
+    actions = [container, vision_container, load_dogbot, load_camera]
 
     if rtsp_enabled:
         load_rtsp = LoadComposableNodes(
-            target_container='dogbot_container',
+            target_container='vision_container',
             composable_node_descriptions=[
                 ComposableNode(
                     package='dogbot_core',
