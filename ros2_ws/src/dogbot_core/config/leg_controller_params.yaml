@@ -1,14 +1,8 @@
 leg_controller:
   ros__parameters:
-<<<<<<< HEAD
     thigh_length: 0.08955 #大腿长度L1
     calf_length: 0.09054 #小腿长度L2
     hip_offset: 0.0 #0.752（髋关节角度偏置）
-=======
-    thigh_length: 0.08955
-    calf_length: 0.09054
-    hip_offset: 0.0 #0.752
->>>>>>> 28517b8 (refactor(ZX30S):add limit set)
     L3: 0.0772
     L4: 0.02383
     L5: 0.075
@@ -23,4 +17,4 @@ leg_controller:
     climb_step_height: 0.03 #每层台阶的高度（单位m）
     climb_reach: 0.04 #攀爬时每条腿向前伸的距离（确保踩到台阶面上）
     climb_phase_time: 0.8 #每个攀爬阶段（单条腿或身体移动）的耗时
-    climb_steps: 1 #连续攀爬台阶的层数（这里的1表示爬一层30mm台阶）
+    climb_steps: 1 #连续攀爬台阶的层数（这里的1表示爬一层30mm台阶） 
