@@ -1,5 +1,6 @@
 #include "controller/gait.hpp"
 #include "controller/leg_solver.hpp"
+#include "controller/spin_gait.hpp"
 
 #include <Eigen/Dense>
 #include <array>
@@ -44,6 +45,12 @@ public:
             this->declare_parameter("climb_phase_time", 0.8),
             this->declare_parameter("climb_steps", 1));
 
+        double spin_step = this->declare_parameter("spin_step", 0.02);
+        double spin_angle = this->declare_parameter("spin_angle", 0.0);
+        spin_gait_ = std::make_unique<SpinGait>();
+        spin_gait_->setParams(stance_y, stance_z, spin_step, step_height, gait_period);
+        spin_gait_->setTargetAngle(spin_angle);
+
         solver_ = std::make_unique<LegSolver>(
             thigh_len, calf_len, hip_offs, L3, L4, L5, r_arm, delta, fork_branch);
 
@@ -65,8 +72,21 @@ public:
                     if (p.get_name() == "gait_mode") {
                         gait_mode_ = parseGaitType(p.as_string());
                         gait_->reset();
+                        spin_gait_->reset();
                         RCLCPP_INFO(
                             this->get_logger(), "Gait switched to %s", p.as_string().c_str());
+                    } else if (p.get_name() == "spin_angle") {
+                        spin_gait_->setTargetAngle(p.as_double());
+                        if (std::abs(p.as_double()) > 1e-6 && gait_mode_ != GaitType::Spin) {
+                            gait_mode_ = GaitType::Spin;
+                            gait_->reset();
+                            RCLCPP_INFO(
+                                this->get_logger(), "Spin started, target %.2f rad",
+                                p.as_double());
+                        } else {
+                            RCLCPP_INFO(this->get_logger(), "Spin target set to %.2f rad",
+                                        p.as_double());
+                        }
                     }
                 }
                 rcl_interfaces::msg::SetParametersResult result;
@@ -90,12 +110,18 @@ private:
     }
 
     void update() {
-        auto feet = gait_->step(gait_mode_, dt_, vx_, omega_z_);
+        std::array<Eigen::Vector3d, 4> feet;
 
-        if (gait_mode_ == GaitType::Climb && gait_->climbDone()) {
-            gait_mode_ = GaitType::Stand;
-            gait_->reset();
-            RCLCPP_INFO(this->get_logger(), "Climb completed, switched to Stand");
+        if (gait_mode_ == GaitType::Spin) {
+            feet = spin_gait_->step(dt_, omega_z_);
+        } else {
+            feet = gait_->step(gait_mode_, dt_, vx_, omega_z_);
+
+            if (gait_mode_ == GaitType::Climb && gait_->climbDone()) {
+                gait_mode_ = GaitType::Stand;
+                gait_->reset();
+                RCLCPP_INFO(this->get_logger(), "Climb completed, switched to Stand");
+            }
         }
 
         for (int i = 0; i < 4; ++i) {
@@ -124,10 +150,14 @@ private:
         if (s == "climb") {
             return GaitType::Climb;
         }
+        if (s == "spin") {
+            return GaitType::Spin;
+        }
         return GaitType::Trot;
     }
 
     std::unique_ptr<Gait> gait_;
+    std::unique_ptr<SpinGait> spin_gait_;
     std::unique_ptr<LegSolver> solver_;
     GaitType gait_mode_ = GaitType::Trot;
 

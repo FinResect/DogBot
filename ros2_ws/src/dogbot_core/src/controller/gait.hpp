@@ -9,7 +9,7 @@
 
 namespace dogbot_core::controller {
 
-enum class GaitType { Stand, Trot, Amble, Walk, Climb };
+enum class GaitType { Stand, Trot, Amble, Walk, Climb, Spin };
 
 class Gait {
 public:
@@ -21,7 +21,7 @@ public:
         step_height_ = step_height;
         period_      = std::max(period, 1e-3);
     }
-
+    
     void setClimbParams(double step_height, double reach, double phase_time, int steps) {
         climb_step_height_ = step_height;
         climb_reach_       = reach;
@@ -50,6 +50,8 @@ public:
         case GaitType::Climb:
             climbStep(dt);
             return feet_;
+        case GaitType::Spin:
+            return standStep();
         }
         return standStep();
     }
