@@ -1,9 +1,10 @@
+#include "controller/gait.hpp"
 #include "controller/leg_solver.hpp"
 
 #include <Eigen/Dense>
 #include <array>
 #include <cmath>
-#include <geometry_msgs/msg/point.hpp>
+#include <geometry_msgs/msg/twist.hpp>
 #include <memory>
 #include <numbers>
 #include <rclcpp/rclcpp.hpp>
@@ -28,11 +29,20 @@ public:
         double delta     = this->declare_parameter("rocker_offset", 1.57);
         bool fork_branch = this->declare_parameter("fork_branch", true);
 
-        stance_y_    = this->declare_parameter("stance_y", 0.0);
-        stance_z_    = this->declare_parameter("stance_z", 0.13);
-        step_length_ = this->declare_parameter("step_length", 0.04);
-        step_height_ = this->declare_parameter("step_height", 0.03);
-        gait_period_ = this->declare_parameter("gait_period", 0.6);
+        double stance_y    = this->declare_parameter("stance_y", 0.0);
+        double stance_z    = this->declare_parameter("stance_z", 0.13);
+        double step_length = this->declare_parameter("step_length", 0.04);
+        double step_height = this->declare_parameter("step_height", 0.03);
+        double gait_period = this->declare_parameter("gait_period", 0.6);
+        gait_mode_         = parseGaitType(this->declare_parameter("gait_mode", std::string("trot")));
+
+        gait_ = std::make_unique<Gait>();
+        gait_->setParams(stance_y, stance_z, step_length, step_height, gait_period);
+        gait_->setClimbParams(
+            this->declare_parameter("climb_step_height", 0.03),
+            this->declare_parameter("climb_reach", 0.04),
+            this->declare_parameter("climb_phase_time", 0.8),
+            this->declare_parameter("climb_steps", 1));
 
         solver_ = std::make_unique<LegSolver>(
             thigh_len, calf_len, hip_offs, L3, L4, L5, r_arm, delta, fork_branch);
@@ -46,23 +56,47 @@ public:
                 std::string(kLegNames[i]) + "_knee/control_angle", 10);
         }
 
-        sub_foot_ = this->create_subscription<geometry_msgs::msg::Point>(
-            "foot_target", 10,
-            std::bind(&LegController::footCallback, this, std::placeholders::_1));
+        sub_cmd_vel_ = this->create_subscription<geometry_msgs::msg::Twist>(
+            "cmd_vel", 10, std::bind(&LegController::cmdVelCallback, this, std::placeholders::_1));
+
+        param_cb_ = this->add_on_set_parameters_callback(
+            [this](const std::vector<rclcpp::Parameter>& params) {
+                for (const auto& p : params) {
+                    if (p.get_name() == "gait_mode") {
+                        gait_mode_ = parseGaitType(p.as_string());
+                        gait_->reset();
+                        RCLCPP_INFO(
+                            this->get_logger(), "Gait switched to %s", p.as_string().c_str());
+                    }
+                }
+                rcl_interfaces::msg::SetParametersResult result;
+                result.successful = true;
+                return result;
+            });
 
         using namespace std::chrono_literals;
         timer_ = this->create_wall_timer(2ms, std::bind(&LegController::update, this));
 
         RCLCPP_INFO(
             this->get_logger(),
-            "LegController ready (L1=%.4f L2=%.4f stance_z=%.3f step=%.3f/%.3f T=%.2fs 1000Hz)",
-            thigh_len, calf_len, stance_z_, step_length_, step_height_, gait_period_);
+            "LegController ready (L1=%.4f L2=%.4f stance_z=%.3f step=%.3f/%.3f T=%.2fs)",
+            thigh_len, calf_len, stance_z, step_length, step_height, gait_period);
     }
 
 private:
+    void cmdVelCallback(const geometry_msgs::msg::Twist::SharedPtr msg) {
+        vx_      = msg->linear.x;
+        omega_z_ = msg->angular.z;
+    }
+
     void update() {
-        const auto feet = walk();
-        t_ += dt_;
+        auto feet = gait_->step(gait_mode_, dt_, vx_, omega_z_);
+
+        if (gait_mode_ == GaitType::Climb && gait_->climbDone()) {
+            gait_mode_ = GaitType::Stand;
+            gait_->reset();
+            RCLCPP_INFO(this->get_logger(), "Climb completed, switched to Stand");
+        }
 
         for (int i = 0; i < 4; ++i) {
             const auto angles = solver_->solve(feet[i]);
@@ -77,50 +111,35 @@ private:
         }
     }
 
-    std::array<Eigen::Vector3d, 4> walk() {
-        std::array<Eigen::Vector3d, 4> foot;
-        // Trot: LF(0)+RB(2) phase 0; LB(1)+RF(3) phase 0.5
-        static constexpr double kPhase[4] = {0.0, 0.5, 0.0, 0.5};
-
-        const double period = std::max(gait_period_, 1e-3);
-        for (int i = 0; i < 4; ++i) {
-            double s = std::fmod(t_ / period + kPhase[i], 1.0);
-            if (s < 0.0) {
-                s += 1.0;
-            }
-
-            double y = stance_y_;
-            double z = stance_z_;
-            if (s < 0.5) {
-                const double u = 2.0 * s;
-                y              = stance_y_ + step_length_ * (2.0 * u - 1.0);
-                z              = stance_z_ + step_height_ * std::sin(std::numbers::pi * u);
-            } else {
-                const double v = 2.0 * (s - 0.5);
-                y              = stance_y_ + step_length_ * (1.0 - 2.0 * v);
-                z              = stance_z_;
-            }
-            foot[i] = Eigen::Vector3d(0.0, y, z);
+    static GaitType parseGaitType(const std::string& s) {
+        if (s == "stand") {
+            return GaitType::Stand;
         }
-        return foot;
+        if (s == "amble") {
+            return GaitType::Amble;
+        }
+        if (s == "walk") {
+            return GaitType::Walk;
+        }
+        if (s == "climb") {
+            return GaitType::Climb;
+        }
+        return GaitType::Trot;
     }
 
-    void footCallback(const geometry_msgs::msg::Point::SharedPtr msg) { (void)msg; }
-
+    std::unique_ptr<Gait> gait_;
     std::unique_ptr<LegSolver> solver_;
+    GaitType gait_mode_ = GaitType::Trot;
 
-    double stance_y_            = 0.0;
-    double stance_z_            = -0.08;
-    double step_length_         = 0.02;
-    double step_height_         = 0.012;
-    double gait_period_         = 1.0;
-    double t_                   = 0.0;
+    double vx_                = 0.0;
+    double omega_z_           = 0.0;
     static constexpr double dt_ = 0.002;
 
     rclcpp::Publisher<std_msgs::msg::Float64>::SharedPtr pub_hip_[4];
     rclcpp::Publisher<std_msgs::msg::Float64>::SharedPtr pub_knee_[4];
-    rclcpp::Subscription<geometry_msgs::msg::Point>::SharedPtr sub_foot_;
+    rclcpp::Subscription<geometry_msgs::msg::Twist>::SharedPtr sub_cmd_vel_;
     rclcpp::TimerBase::SharedPtr timer_;
+    rclcpp::node_interfaces::OnSetParametersCallbackHandle::SharedPtr param_cb_;
 };
 
 } // namespace dogbot_core::controller
