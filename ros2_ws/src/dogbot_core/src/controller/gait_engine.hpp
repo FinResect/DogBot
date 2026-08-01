@@ -51,6 +51,14 @@ public:
             return;
         }
 
+        if (type_ == GaitType::Stand) {
+            for (int i = 0; i < kLegCount; ++i) {
+                feet_[i] = Eigen::Vector3d(0.0, legs_[i].base_y, legs_[i].z_stance);
+            }
+            feet_vel_.fill(Eigen::Vector3d::Zero());
+            return;
+        }
+
         elapsed_ += dt;
 
         for (int i = 0; i < kLegCount; ++i) {
