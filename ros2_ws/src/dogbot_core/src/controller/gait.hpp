@@ -7,9 +7,11 @@
 #include <cmath>
 #include <numbers>
 
+#include "spin_gait.hpp"
+
 namespace dogbot_core::controller {
 
-enum class GaitType { Stand, Trot, Amble, Walk, Climb, Spin };
+enum class GaitType { Stand, Trot, Amble, Walk, Climb, Spin, TrotSpinMix };
 
 class Gait {
 public:
@@ -52,8 +54,27 @@ public:
             return feet_;
         case GaitType::Spin:
             return standStep();
+        case GaitType::TrotSpinMix:
+            return standStep();
         }
         return standStep();
+    }
+
+    std::array<Eigen::Vector3d, 4> stepSpinMix(
+        SpinGait& spin, double dt, double vx, double omega_z) {
+        std::array<Eigen::Vector3d, 4> fwd;
+        if (std::abs(vx) > 1e-6) {
+            fwd = cyclicStep(kTrotPhase, vx, 0.0);
+        } else {
+            fwd.fill(Eigen::Vector3d(0.0, stance_y_, stance_z_));
+        }
+        auto rot = spin.step(dt, omega_z);
+        const Eigen::Vector3d stance(0.0, stance_y_, stance_z_);
+        std::array<Eigen::Vector3d, 4> out;
+        for (int i = 0; i < 4; ++i) {
+            out[i] = fwd[i] + rot[i] - stance;
+        }
+        return out;
     }
 
 private:

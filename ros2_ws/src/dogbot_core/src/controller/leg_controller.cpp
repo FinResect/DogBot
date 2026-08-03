@@ -45,11 +45,11 @@ public:
             this->declare_parameter("climb_phase_time", 0.8),
             this->declare_parameter("climb_steps", 1));
 
-        double spin_step = this->declare_parameter("spin_step", 0.02);
-        double spin_angle = this->declare_parameter("spin_angle", 0.0);
+        double spin_gain = this->declare_parameter("spin_gain", 1.0);
+        spin_omega_ = this->declare_parameter("spin_omega", 0.0);
+        trot_vx_ = this->declare_parameter("trot_vx", 0.0);
         spin_gait_ = std::make_unique<SpinGait>();
-        spin_gait_->setParams(stance_y, stance_z, spin_step, step_height, gait_period);
-        spin_gait_->setTargetAngle(spin_angle);
+        spin_gait_->setParams(stance_y, stance_z, step_height, gait_period, spin_gain);
 
         solver_ = std::make_unique<LegSolver>(
             thigh_len, calf_len, hip_offs, L3, L4, L5, r_arm, delta, fork_branch);
@@ -75,18 +75,10 @@ public:
                         spin_gait_->reset();
                         RCLCPP_INFO(
                             this->get_logger(), "Gait switched to %s", p.as_string().c_str());
-                    } else if (p.get_name() == "spin_angle") {
-                        spin_gait_->setTargetAngle(p.as_double());
-                        if (std::abs(p.as_double()) > 1e-6 && gait_mode_ != GaitType::Spin) {
-                            gait_mode_ = GaitType::Spin;
-                            gait_->reset();
-                            RCLCPP_INFO(
-                                this->get_logger(), "Spin started, target %.2f rad",
-                                p.as_double());
-                        } else {
-                            RCLCPP_INFO(this->get_logger(), "Spin target set to %.2f rad",
-                                        p.as_double());
-                        }
+                    } else if (p.get_name() == "spin_omega") {
+                        spin_omega_ = p.as_double();
+                    } else if (p.get_name() == "trot_vx") {
+                        trot_vx_ = p.as_double();
                     }
                 }
                 rcl_interfaces::msg::SetParametersResult result;
@@ -112,10 +104,16 @@ private:
     void update() {
         std::array<Eigen::Vector3d, 4> feet;
 
+        const double vx = std::abs(trot_vx_) > 1e-6 ? trot_vx_ : vx_;
+
         if (gait_mode_ == GaitType::Spin) {
-            feet = spin_gait_->step(dt_, omega_z_);
+            const double omega = std::abs(spin_omega_) > 1e-6 ? spin_omega_ : omega_z_;
+            feet = spin_gait_->step(dt_, omega);
+        } else if (gait_mode_ == GaitType::TrotSpinMix) {
+            const double omega = std::abs(spin_omega_) > 1e-6 ? spin_omega_ : omega_z_;
+            feet = gait_->stepSpinMix(*spin_gait_, dt_, vx, omega);
         } else {
-            feet = gait_->step(gait_mode_, dt_, vx_, omega_z_);
+            feet = gait_->step(gait_mode_, dt_, vx, omega_z_);
 
             if (gait_mode_ == GaitType::Climb && gait_->climbDone()) {
                 gait_mode_ = GaitType::Stand;
@@ -153,6 +151,9 @@ private:
         if (s == "spin") {
             return GaitType::Spin;
         }
+        if (s == "trot_spin_mix") {
+            return GaitType::TrotSpinMix;
+        }
         return GaitType::Trot;
     }
 
@@ -163,6 +164,8 @@ private:
 
     double vx_                = 0.0;
     double omega_z_           = 0.0;
+    double spin_omega_        = 0.0;
+    double trot_vx_           = 0.0;
     static constexpr double dt_ = 0.002;
 
     rclcpp::Publisher<std_msgs::msg::Float64>::SharedPtr pub_hip_[4];

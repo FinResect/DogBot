@@ -14,10 +14,7 @@ leg_controller:
     step_length: 0.04
     step_height: 0.03
     gait_period: 0.6
-    gait_mode: trot # stand/trot/amble/walk/climb/spin
-    spin_step: 0.02 # 旋转步态单足步幅(m)
-    spin_angle: 0.0 # 目标旋转角度(rad)，非0自动旋转后停止；0=停
-    climb_step_height: 0.03
-    climb_reach: 0.04
-    climb_phase_time: 0.8
-    climb_steps: 1
+    gait_mode: trot_spin_mix
+    spin_gain: 1.0 
+    spin_omega: 5.0
+    trot_vx: 0.27

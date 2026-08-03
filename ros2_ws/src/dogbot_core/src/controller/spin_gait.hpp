@@ -12,58 +12,26 @@ namespace dogbot_core::controller {
 class SpinGait {
 public:
     void setParams(
-        double stance_y, double stance_z, double spin_step, double step_height, double period) {
+        double stance_y, double stance_z, double step_height, double period,
+        double spin_gain = 1.0) {
         stance_y_    = stance_y;
         stance_z_    = stance_z;
-        spin_step_   = spin_step;
         step_height_ = step_height;
         period_      = std::max(period, 1e-3);
+        spin_gain_   = std::max(spin_gain, 0.0);
     }
 
-    void reset() {
-        t_           = 0.0;
-        target_angle_ = 0.0;
-        accumulated_ = 0.0;
-        done_        = true;
-    }
-
-    void setTargetAngle(double rad) {
-        target_angle_ = rad;
-        accumulated_  = 0.0;
-        done_         = std::abs(rad) < 1e-6;
-    }
-
-    double rotationProgress() const { return accumulated_; }
-
-    bool isDone() const { return done_; }
+    void reset() { t_ = 0.0; }
 
     std::array<Eigen::Vector3d, 4> step(double dt, double omega_z = 0.0) {
         t_ += dt;
 
-        const bool has_velocity = std::abs(omega_z) > 1e-6;
-        const bool has_target   = std::abs(target_angle_) > 1e-6;
-
-        if (done_ && !has_velocity && has_target) {
+        if (std::abs(omega_z) < 1e-6) {
             return standPose();
         }
 
-        double d = 1.0;          // 旋转方向: +1 逆时针, -1 顺时针
-        double s = spin_step_;   // 单足步幅
-
-        if (has_velocity) {
-            d = omega_z > 0.0 ? 1.0 : -1.0;
-            s = std::abs(omega_z) * kLateralOffset * period_ / 4.0;
-        } else if (has_target) {
-            d = target_angle_ > 0.0 ? 1.0 : -1.0;
-        }
-
-        const double omega_body = 4.0 * s / (period_ * kLateralOffset);
-        accumulated_ += d * omega_body * dt;
-
-        if (has_target && std::abs(accumulated_) >= std::abs(target_angle_)) {
-            done_ = true;
-            return standPose();
-        }
+        const double d = omega_z > 0.0 ? 1.0 : -1.0;   // 旋转方向: +1 逆时针, -1 顺时针
+        const double s = spin_gain_ * std::abs(omega_z) * kLateralOffset * period_ / 4.0;
 
         for (int i = 0; i < 4; ++i) {
             const double stride = -d * s * std::copysign(1.0, kLegBodyY[i]);
@@ -109,13 +77,9 @@ private:
 
     double stance_y_    = 0.0;
     double stance_z_    = 0.13;
-    double spin_step_   = 0.02;
     double step_height_ = 0.03;
     double period_      = 0.6;
-
-    double target_angle_ = 0.0;
-    double accumulated_  = 0.0;
-    bool done_           = true;
+    double spin_gain_   = 1.0;
 
     std::array<Eigen::Vector3d, 4> feet_{};
 };
