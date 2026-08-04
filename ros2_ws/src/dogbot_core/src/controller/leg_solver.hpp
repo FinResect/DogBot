@@ -38,7 +38,7 @@ public:
         cos_knee               = std::clamp(cos_knee, -1.0, 1.0);
         double theta_knee_geom = std::acos(cos_knee);
 
-        double alpha = std::atan2(foot.z(), foot.y());
+        double alpha = std::atan2(foot.z(), -foot.y());
         double beta =
             std::atan2(L2_ * std::sin(theta_knee_geom), L1_ + L2_ * std::cos(theta_knee_geom));
         double theta_hip = alpha - beta + hip_offset_;

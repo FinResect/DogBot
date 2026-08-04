@@ -62,6 +62,7 @@ public:
 
     std::array<Eigen::Vector3d, 4> stepSpinMix(
         SpinGait& spin, double dt, double vx, double omega_z) {
+        t_ += dt;
         std::array<Eigen::Vector3d, 4> fwd;
         if (std::abs(vx) > 1e-6) {
             fwd = cyclicStep(kTrotPhase, vx, 0.0);
@@ -72,7 +73,11 @@ public:
         const Eigen::Vector3d stance(0.0, stance_y_, stance_z_);
         std::array<Eigen::Vector3d, 4> out;
         for (int i = 0; i < 4; ++i) {
-            out[i] = fwd[i] + rot[i] - stance;
+            const double y =
+                fwd[i].y() + rot[i].y() - stance.y();
+            const double dz =
+                std::min(fwd[i].z() - stance.z(), rot[i].z() - stance.z());
+            out[i] = Eigen::Vector3d(0.0, y, stance.z() + dz);
         }
         return out;
     }
@@ -108,7 +113,7 @@ private:
         if (s < 0.5) {
             const double u = 2.0 * s;
             const double y = stance_y_ + stride * (2.0 * u - 1.0);
-            const double z = stance_z_ + step_height_ * std::sin(std::numbers::pi * u);
+            const double z = stance_z_ - step_height_ * std::sin(std::numbers::pi * u);
             return Eigen::Vector3d(0.0, y, z);
         }
 

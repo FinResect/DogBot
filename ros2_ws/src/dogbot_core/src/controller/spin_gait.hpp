@@ -64,7 +64,7 @@ private:
         if (s < 0.5) {
             const double u = 2.0 * s;
             const double y = stance_y_ + stride * (2.0 * u - 1.0);
-            const double z = stance_z_ + step_height_ * std::sin(std::numbers::pi * u);
+            const double z = stance_z_ - step_height_ * std::sin(std::numbers::pi * u);
             return Eigen::Vector3d(0.0, y, z);
         }
 
