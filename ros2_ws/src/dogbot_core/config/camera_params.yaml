@@ -20,6 +20,8 @@ following_node:
     gaussian_kernel_size: 5
     roi_bottom_ratio: 0.6
     lookahead_distance: 100
+    smooth_window_size: 7
+    interpolate_gaps: true
 
 color_detect_node:
   ros__parameters:

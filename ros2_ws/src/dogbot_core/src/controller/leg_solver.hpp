@@ -50,11 +50,11 @@ public:
 
 private:
     double servoAngleFromKnee(double knee_geom) const {
-        double psi = knee_geom + delta_;
+        double psi = std::numbers::pi - knee_geom + delta_;
 
-        double A = K2() + std::cos(psi);
-        double B = std::sin(psi);
-        double C = K1() * std::cos(psi) + K3();
+        double A = 0.0;
+        double B = 2.0 * a_ * (d_ + b_ * std::cos(psi));
+        double C = a_ * a_ + b_ * b_ + d_ * d_ - c_ * c_ + 2.0 * b_ * d_ * std::cos(psi);
 
         double norm  = std::sqrt(A * A + B * B);
         double ratio = std::clamp(C / norm, -1.0, 1.0);
@@ -67,10 +67,6 @@ private:
         }
         return phi;
     }
-
-    double K1() const { return d_ / c_; }
-    double K2() const { return d_ / a_; }
-    double K3() const { return (a_ * a_ - b_ * b_ + c_ * c_ + d_ * d_) / (2.0 * a_ * c_); }
 
     double L1_, L2_, hip_offset_;
     double a_, b_, c_, d_, delta_;

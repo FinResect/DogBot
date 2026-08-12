@@ -2,18 +2,10 @@ leg_controller:
   ros__parameters:
     thigh_length: 0.08955
     calf_length: 0.09054
-    hip_offset: 0.0 #0.752
-    L3: 0.0772
-    L4: 0.02383
-    L5: 0.075
-    servo_arm: 0.02355
-    rocker_offset: -2.70
-    fork_branch: true
-    stance_y: 0.0
-    stance_z: 0.13
-    step_length: 0.04
-    step_height: 0.03
-    gait_period: 0.6
-    gait_mode: trot_spin_mix
-    spin_omega: 5.0
-    trot_vx: 0.27
+    hip_offset: 0.1 #0.752
+    L3: 0.0757 #机架 d
+    L4: 0.073 #连杆 c
+    L5: 0.02417 #从动摇杆 b
+    servo_arm: 0.01929 #主动曲柄a
+    rocker_offset: 0.0 #-2.70
+    fork_branch: false

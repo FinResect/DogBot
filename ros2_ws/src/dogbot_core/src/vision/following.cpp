@@ -18,8 +18,10 @@ public:
         canny_low_        = declare_parameter("canny_low_threshold", 50);
         canny_high_       = declare_parameter("canny_high_threshold", 150);
         blur_ksize_       = declare_parameter("gaussian_kernel_size", 5);
-        roi_bottom_ratio_ = declare_parameter("roi_bottom_ratio", 0.6);
-        lookahead_dist_   = declare_parameter("lookahead_distance", 100);
+        roi_bottom_ratio_  = declare_parameter("roi_bottom_ratio", 0.6);
+        lookahead_dist_    = declare_parameter("lookahead_distance", 100);
+        smooth_window_size_ = declare_parameter("smooth_window_size", 7);
+        interpolate_gaps_  = declare_parameter("interpolate_gaps", true);
 
         int ksize = blur_ksize_;
         if (ksize % 2 == 0) {
@@ -79,6 +81,75 @@ private:
             }
         }
 
+        int num_rows = bottom_row - roi_start_row + 1;
+        std::vector<double> x_by_row(num_rows, -1.0);
+        for (const auto& pt : center_points) {
+            int idx = bottom_row - pt.y;
+            if (idx >= 0 && idx < num_rows) {
+                x_by_row[idx] = static_cast<double>(pt.x);
+            }
+        }
+
+        if (interpolate_gaps_) {
+            int last_known = -1;
+            for (int i = 0; i < num_rows; ++i) {
+                if (x_by_row[i] >= 0) {
+                    if (last_known >= 0 && i > last_known + 1) {
+                        double x0 = x_by_row[last_known];
+                        double x1 = x_by_row[i];
+                        int gap = i - last_known;
+                        for (int j = 1; j < gap; ++j) {
+                            double t = static_cast<double>(j) / gap;
+                            x_by_row[last_known + j] = x0 + (x1 - x0) * t;
+                        }
+                    }
+                    last_known = i;
+                }
+            }
+            int first = -1;
+            for (int i = 0; i < num_rows; ++i) {
+                if (x_by_row[i] >= 0) {
+                    first = i;
+                    break;
+                }
+            }
+            int last = -1;
+            for (int i = num_rows - 1; i >= 0; --i) {
+                if (x_by_row[i] >= 0) {
+                    last = i;
+                    break;
+                }
+            }
+            if (first > 0) {
+                for (int i = 0; i < first; ++i) {
+                    x_by_row[i] = x_by_row[first];
+                }
+            }
+            if (last >= 0 && last < num_rows - 1) {
+                for (int i = last + 1; i < num_rows; ++i) {
+                    x_by_row[i] = x_by_row[last];
+                }
+            }
+        }
+
+        int half = smooth_window_size_ / 2;
+        std::vector<double> smoothed(num_rows, -1.0);
+        for (int i = 0; i < num_rows; ++i) {
+            int start = std::max(0, i - half);
+            int end = std::min(num_rows - 1, i + half);
+            double sum = 0.0;
+            int cnt = 0;
+            for (int j = start; j <= end; ++j) {
+                if (x_by_row[j] >= 0) {
+                    sum += x_by_row[j];
+                    ++cnt;
+                }
+            }
+            if (cnt > 0) {
+                smoothed[i] = sum / cnt;
+            }
+        }
+
         cv::Mat output;
         cv::cvtColor(edges, output, cv::COLOR_GRAY2BGR);
 
@@ -86,38 +157,38 @@ private:
             cv::circle(output, pt, 2, cv::Scalar(255, 0, 0), -1);
         }
 
-        double theta = 0.0;
-
-        if (center_points.size() >= 2) {
-            const auto& bottom_midpoint = center_points.front();
-
-            cv::Point ahead_pt = bottom_midpoint;
-            int target_row     = bottom_midpoint.y - lookahead_dist_;
-            if (target_row < roi_start_row) {
-                target_row = roi_start_row;
+        std::vector<cv::Point> smoothed_pts;
+        for (int i = 0; i < num_rows; ++i) {
+            if (smoothed[i] >= 0) {
+                smoothed_pts.emplace_back(
+                    cv::Point(static_cast<int>(smoothed[i]), bottom_row - i));
             }
-            int min_diff = std::numeric_limits<int>::max();
-            for (const auto& pt : center_points) {
-                int diff = std::abs(pt.y - target_row);
-                if (diff < min_diff) {
-                    min_diff = diff;
-                    ahead_pt = pt;
-                }
-            }
-
-            int dy = bottom_midpoint.y - ahead_pt.y;
-            if (dy > 0) {
-                theta = std::atan2(
-                    static_cast<double>(bottom_midpoint.x - ahead_pt.x), static_cast<double>(dy));
-            }
-
-            cv::Point ref_end(bottom_midpoint.x, bottom_midpoint.y - lookahead_dist_);
-            cv::line(output, bottom_midpoint, ref_end, cv::Scalar(0, 0, 255), 2);
-
-            cv::line(output, bottom_midpoint, ahead_pt, cv::Scalar(0, 255, 0), 2);
+        }
+        if (smoothed_pts.size() >= 2) {
+            cv::polylines(output, smoothed_pts, false, cv::Scalar(0, 255, 0), 1);
         }
 
-        RCLCPP_INFO(this->get_logger(), "theta:%f", theta);
+        double theta = 0.0;
+
+        if (!smoothed_pts.empty() && smoothed[0] >= 0) {
+            double bottom_x = smoothed[0];
+            int lookahead_idx = std::min(lookahead_dist_, num_rows - 1);
+            double ahead_x = smoothed[lookahead_idx];
+
+            if (ahead_x >= 0 && lookahead_idx > 0) {
+                theta = std::atan2(bottom_x - ahead_x,
+                                   static_cast<double>(lookahead_idx));
+            }
+
+            cv::Point bottom_pt(static_cast<int>(bottom_x), bottom_row);
+            cv::Point ref_end(bottom_pt.x, bottom_pt.y - lookahead_dist_);
+            cv::line(output, bottom_pt, ref_end, cv::Scalar(0, 0, 255), 2);
+
+            cv::Point ahead_pt(static_cast<int>(ahead_x >= 0 ? ahead_x : bottom_x),
+                               bottom_row - lookahead_idx);
+            cv::line(output, bottom_pt, ahead_pt, cv::Scalar(0, 255, 255), 2);
+        }
+
         auto theta_msg = std_msgs::msg::Float64();
         theta_msg.data = theta;
         theta_pub_->publish(theta_msg);
@@ -135,6 +206,8 @@ private:
     int blur_ksize_;
     double roi_bottom_ratio_;
     int lookahead_dist_;
+    int smooth_window_size_;
+    bool interpolate_gaps_;
 };
 
 } // namespace dogbot_core::vision
