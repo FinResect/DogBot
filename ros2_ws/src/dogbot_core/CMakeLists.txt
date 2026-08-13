@@ -9,6 +9,7 @@ if(CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
 endif()
 
 find_package(ament_cmake REQUIRED)
+find_package(dogbot_msg REQUIRED)
 find_package(Eigen3 REQUIRED)
 find_package(geometry_msgs REQUIRED)
 find_package(rclcpp REQUIRED)
@@ -37,7 +38,7 @@ target_include_directories(dogbot_core_lib PUBLIC
   ${GST_INCLUDE_DIRS}
   ${GST_RTSP_INCLUDE_DIRS})
 ament_target_dependencies(dogbot_core_lib
-  geometry_msgs rclcpp rclcpp_components std_msgs
+  dogbot_msg geometry_msgs rclcpp rclcpp_components std_msgs
   sensor_msgs cv_bridge)
 target_link_libraries(dogbot_core_lib
   ${OpenCV_LIBS}

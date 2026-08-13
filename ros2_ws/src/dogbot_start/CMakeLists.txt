@@ -7,6 +7,9 @@ endif()
 
 # find dependencies
 find_package(ament_cmake REQUIRED)
+if(CMAKE_EXPORT_COMPILE_COMMANDS)
+  message(STATUS "compile_commands export requested (no compile targets)")
+endif()
 install(DIRECTORY launch DESTINATION share/${PROJECT_NAME})
 
 if(BUILD_TESTING)

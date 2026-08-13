@@ -1,5 +1,0 @@
-string prompt
-string query
----
-bool success
-string message

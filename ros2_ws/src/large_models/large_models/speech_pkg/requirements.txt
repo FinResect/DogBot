@@ -1,9 +1,0 @@
-opencv-python
-pyserial
-wave
-torch
-webrtcvad
-numpy
-sounddevice
-openai
-librosa
