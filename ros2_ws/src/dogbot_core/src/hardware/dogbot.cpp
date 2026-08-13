@@ -7,6 +7,7 @@
 #include <thread>
 
 #include "device/ZX30S.hpp"
+#include "device/gamepad.hpp"
 #include "serial/serial.hpp"
 
 namespace dogbot_core::hardware {
@@ -15,6 +16,8 @@ public:
     explicit DogBot(const rclcpp::NodeOptions& options)
         : Node("dogbot", options)
         , serial_("/dev/ttyAMA0", 1000000) {
+
+        gamepad_.init(this, "/remote", "/dev/input/js0");
 
         knee_[0].init(this, "left_front_knee", 0, 0.0, 270.0);
         knee_[1].init(this, "left_back_knee", 2, 0.0, 270.0);
@@ -50,6 +53,11 @@ public:
 
 private:
     void update() {
+        command_update();
+        gamepad_.update();
+    }
+
+    void command_update() {
         auto clock = this->get_clock();
         for (auto& s : knee_) {
             try {
@@ -74,6 +82,7 @@ private:
     }
 
     SerialPort serial_;
+    device::Gamepad gamepad_;
     dogbot_core::hardware::device::ZX30S knee_[4];
     dogbot_core::hardware::device::ZX30S hip_[4];
     rclcpp::TimerBase::SharedPtr timer_;

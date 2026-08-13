@@ -2,7 +2,7 @@ leg_controller:
   ros__parameters:
     thigh_length: 0.08955
     calf_length: 0.09054
-    hip_offset: 0.1 #0.752
+    hip_offset: 0.4 #0.752
     L3: 0.0757 #机架 d
     L4: 0.073 #连杆 c
     L5: 0.02417 #从动摇杆 b

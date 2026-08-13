@@ -13,8 +13,12 @@ find_package(ament_cmake REQUIRED)
 find_package(rosidl_default_generators REQUIRED)
 
 rosidl_generate_interfaces(${PROJECT_NAME}
-  "msg/Stick2D.msg"
+  "msg/Buttons.msg"
+  "msg/DPad.msg"
   "msg/GamepadState.msg"
+  "msg/Shoulders.msg"
+  "msg/Stick2D.msg"
+  "msg/Sticks.msg"
 )
 
 if(BUILD_TESTING)

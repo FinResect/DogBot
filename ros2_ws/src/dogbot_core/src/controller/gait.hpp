@@ -61,7 +61,7 @@ public:
     }
 
 private:
-    static constexpr double kStanceZ    = 0.10; // 站立时足端离髋竖直距离 (m)
+    static constexpr double kStanceZ    = 0.08; // 站立时足端离髋竖直距离 (m)
     static constexpr double kStepHeight = 0.04; // 摆动相抬脚高度 (m)
     static constexpr double kPeriod     = 0.6;  // 步态周期 (s)
     // 足端最大速度 (m/s)：由舵机最大转速 187.5°/s (0.32s/60°) 反推——

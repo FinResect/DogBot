@@ -4,6 +4,7 @@
 #include <std_msgs/msg/float64.hpp>
 
 #include <algorithm>
+#include <cmath>
 #include <iomanip>
 #include <sstream>
 #include <stdexcept>
@@ -51,6 +52,10 @@ public:
     }
 
     std::string generateAngleCommand(uint16_t time_ms = 0) const {
+        // NaN 角度 = 零力矩指令：释放扭力（指令表 #IDPULK!）
+        if (std::isnan(control_angle_)) {
+            return generateReleaseTorque();
+        }
         return generateCommand(angleToPWM(control_angle_), time_ms);
     }
 

@@ -1,9 +1,12 @@
 #include "controller/gait.hpp"
 #include "controller/leg_solver.hpp"
+#include "controller_mode.hpp"
 
 #include <Eigen/Dense>
 #include <array>
 #include <cmath>
+#include <cstdint>
+#include <dogbot_msg/msg/gamepad_state.hpp>
 #include <geometry_msgs/msg/twist.hpp>
 #include <memory>
 #include <numbers>
@@ -32,6 +35,10 @@ public:
         solver_ = std::make_unique<LegSolver>(
             thigh_len, calf_len, hip_offs, L3, L4, L5, r_arm, delta, fork_branch);
 
+        gamepad_state_sub_ = create_subscription<dogbot_msg::msg::GamepadState>(
+            "/remote/gamepad", 10,
+            [this](const dogbot_msg::msg::GamepadState::SharedPtr msg) { gamepad_state_ = *msg; });
+
         theta_sub_ = create_subscription<std_msgs::msg::Float64>(
             "/vision/following/theta", 10,
             [this](const std_msgs::msg::Float64::SharedPtr msg) { theta_ = msg->data; });
@@ -51,17 +58,75 @@ public:
 
 private:
     void update() {
-        static bool flag = true;
-        if (flag) {
-            gait_.setGaitType(GaitType::TrotSpinMix);
-            flag = !flag;
+        using namespace dogbot_msg::msg;
+
+        auto button_x       = gamepad_state_.buttons.x;
+        auto button_y       = gamepad_state_.buttons.y;
+        auto button_a       = gamepad_state_.buttons.a;
+        auto button_b       = gamepad_state_.buttons.b;
+        auto button_start   = gamepad_state_.buttons.start;
+        auto button_mode    = gamepad_state_.buttons.mode;
+        auto joystick_left  = gamepad_state_.sticks.joystick_left;
+        auto joystick_right = gamepad_state_.sticks.joystick_right;
+
+        if (gamepad_state_.status == GamepadState::UNKNOWN
+            || gamepad_state_.status == GamepadState::DISCONNECTED
+            || (button_mode && !last_button_mode)) {
+            reset_all_controller();
+            controller_mode_ = dogbot_msg::ControllerMode::None;
+            return;
         }
-        solver_update(feet_update());
+
+        if (button_start && !last_button_start) {
+            gait_.setGaitType(GaitType::Stand);
+            controller_mode_ = dogbot_msg::ControllerMode::Auto;
+        } else if (button_x && !last_button_x) {
+            gait_.setGaitType(GaitType::Trot);
+            controller_mode_ = dogbot_msg::ControllerMode::Auto;
+        } else if (button_y && !last_button_y) {
+            gait_.setGaitType(GaitType::TrotSpinMix);
+            controller_mode_ = dogbot_msg::ControllerMode::Manual;
+        } else if (button_a && !last_button_a) {
+            gait_.setGaitType(GaitType::Climb);
+            controller_mode_ = dogbot_msg::ControllerMode::Auto;
+        } else if (button_b && !last_button_b) {
+            gait_.setGaitType(GaitType::Spin);
+            controller_mode_ = dogbot_msg::ControllerMode::Auto;
+        }
+
+        switch (controller_mode_) {
+        case dogbot_msg::ControllerMode::Auto: solver_update(feet_update(0.2, 2.0)); break;
+        case dogbot_msg::ControllerMode::Manual:
+            solver_update(feet_update(0.2 * joystick_left.y, -5.0 * joystick_right.x));
+            break;
+        default: reset_all_controller(); break;
+        }
+
+        last_button_a     = button_a;
+        last_button_b     = button_b;
+        last_button_x     = button_x;
+        last_button_y     = button_y;
+        last_button_start = button_start;
+        last_button_mode  = button_mode;
     }
 
-    std::array<Eigen::Vector3d, 4> feet_update() {
+    void reset_all_controller() {
+        gait_.reset();
+        for (int i = 0; i < 4; ++i) {
 
-        gait_.setGaitParam(0.2 * std::cos(theta_), 2.0 * std::sin(theta_));
+            std_msgs::msg::Float64 hip_msg;
+            std_msgs::msg::Float64 knee_msg;
+            hip_msg.data  = NAN;
+            knee_msg.data = NAN;
+
+            pub_hip_[i]->publish(hip_msg);
+            pub_knee_[i]->publish(knee_msg);
+        }
+    }
+
+    std::array<Eigen::Vector3d, 4> feet_update(double vx, double omega) {
+
+        gait_.setGaitParam(vx, omega);
         return gait_.update(dt_);
     }
 
@@ -79,18 +144,26 @@ private:
         }
     }
 
+    dogbot_msg::msg::GamepadState gamepad_state_;
     Gait gait_;
     std::unique_ptr<LegSolver> solver_;
+    dogbot_msg::ControllerMode controller_mode_{dogbot_msg::ControllerMode::None};
+
+    uint8_t last_button_x;
+    uint8_t last_button_y;
+    uint8_t last_button_a;
+    uint8_t last_button_b;
+    uint8_t last_button_start;
+    uint8_t last_button_mode;
 
     double theta_               = 0.0;
     static constexpr double dt_ = 0.002;
 
+    rclcpp::Subscription<dogbot_msg::msg::GamepadState>::SharedPtr gamepad_state_sub_;
     rclcpp::Subscription<std_msgs::msg::Float64>::SharedPtr theta_sub_;
     rclcpp::Publisher<std_msgs::msg::Float64>::SharedPtr pub_hip_[4];
     rclcpp::Publisher<std_msgs::msg::Float64>::SharedPtr pub_knee_[4];
-    rclcpp::Subscription<geometry_msgs::msg::Twist>::SharedPtr sub_cmd_vel_;
     rclcpp::TimerBase::SharedPtr timer_;
-    rclcpp::node_interfaces::OnSetParametersCallbackHandle::SharedPtr param_cb_;
 };
 
 } // namespace dogbot_core::controller
