@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <numbers>
 
 namespace dogbot_core::controller {
 
@@ -43,7 +44,7 @@ public:
             std::atan2(L2_ * std::sin(theta_knee_geom), L1_ + L2_ * std::cos(theta_knee_geom));
         double theta_hip = alpha - beta + hip_offset_;
 
-        double theta_knee_servo = servoAngleFromKnee(theta_knee_geom);
+        double theta_knee_servo = servoAngleFromKnee(std::numbers::pi - theta_knee_geom);
 
         return {theta_hip, theta_knee_servo};
     }

@@ -1,0 +1,434 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>DogBot 步态可视化（walk / trot 足端轨迹）</title>
+<style>
+  :root { --bg:#101418; --panel:#171c22; --fg:#d8dee4; --dim:#6b7680; --accent:#4d9fff; }
+  * { box-sizing: border-box; }
+  body { background:var(--bg); color:var(--fg); font:14px/1.5 "PingFang SC","Microsoft YaHei",monospace; margin:0; padding:16px; }
+  h1 { font-size:18px; margin:0 0 12px; color:#fff; }
+  .controls { display:flex; flex-wrap:wrap; gap:18px; align-items:center; background:var(--panel); border:1px solid #26303a; border-radius:8px; padding:10px 14px; margin-bottom:12px; }
+  .ctl { display:flex; align-items:center; gap:8px; }
+  .ctl label { color:var(--dim); font-size:12px; white-space:nowrap; }
+  .ctl b { min-width:52px; text-align:right; }
+  button { background:#222b35; color:var(--fg); border:1px solid #35404c; border-radius:6px; padding:5px 12px; cursor:pointer; }
+  button:hover { border-color:var(--accent); }
+  button.active { background:var(--accent); color:#0b0f13; border-color:var(--accent); font-weight:700; }
+  input[type=range] { width:140px; accent-color:var(--accent); }
+  .canvas-row { display:flex; gap:12px; margin-bottom:12px; flex-wrap:wrap; }
+  canvas { background:var(--panel); border:1px solid #26303a; border-radius:8px; }
+  .legend { display:flex; gap:14px; font-size:12px; color:var(--dim); margin:4px 2px 0; }
+  .legend span { display:flex; align-items:center; gap:5px; }
+  .dot { width:10px; height:10px; border-radius:50%; display:inline-block; }
+  .knee { display:flex; align-items:center; gap:10px; min-width:300px; }
+  .knee .bar { flex:1; height:10px; background:#1b222b; border-radius:5px; overflow:hidden; }
+  .knee .fill { height:100%; width:0%; background:linear-gradient(90deg,#4dff88,#ffb84d,#ff5a5a); transition:width .08s linear; }
+  .info { font-size:12px; color:var(--dim); }
+</style>
+</head>
+<body>
+<h1>DogBot 步态可视化 — 足端轨迹（复刻 gait.hpp 的 step_cycle）</h1>
+
+<div class="controls">
+  <div class="ctl">
+    <label>步态</label>
+    <button id="btnWalk" class="active">Walk</button>
+    <button id="btnTrot">Trot</button>
+  </div>
+  <div class="ctl">
+    <label>vx</label>
+    <input type="range" id="vxSlider" min="0" max="0.32" step="0.001" value="0.2">
+    <b id="vxVal">0.200</b><span class="info">m/s</span>
+  </div>
+  <div class="ctl">
+    <label>速度倍率</label>
+    <input type="range" id="speedSlider" min="0.25" max="4" step="0.25" value="1">
+    <b id="speedVal">1.00</b><span class="info">x</span>
+  </div>
+  <button id="btnPause">暂停</button>
+  <button id="btnReset">复位</button>
+  <div class="knee">
+    <label>膝舵机需求（摆动窗口均值）</label>
+    <div class="bar"><div class="fill" id="kneeFill"></div></div>
+    <b id="kneeVal">0</b><span class="info">°/s（上限 187.5）</span>
+  </div>
+</div>
+<div class="info" id="paramInfo" style="margin-bottom:10px;"></div>
+
+<div class="canvas-row">
+  <div>
+    <canvas id="cvSide" width="640" height="400"></canvas>
+    <div class="legend" id="legend"></div>
+  </div>
+  <div>
+    <canvas id="cvPath" width="640" height="400"></canvas>
+    <div class="legend" style="justify-content:center;">腿平面 (y, -z) 足端路径（拖尾约 2.4s）</div>
+  </div>
+</div>
+<div class="canvas-row">
+  <div>
+    <canvas id="cvSignals" width="1292" height="240"></canvas>
+    <div class="legend" style="justify-content:center;">LF 腿 y(t)（上，±0.05）与 z(t)（下，0.07~0.13），时间轴 1.2s</div>
+  </div>
+</div>
+
+<script>
+'use strict';
+// ============ 常量（与 gait.hpp 一致） ============
+const G = {
+  kStanceZ: 0.08,
+  kStepHeight: 0.04,
+  kMaxFootSpeed: 0.32,
+  kneeLimitDeg: 187.5,
+  gait: {
+    walk: {
+      T: 1.0, swingRatio: 0.25,
+      strideTime: 1.0 * (1 - 0.25) * 0.5,
+      maxStride: 0.32 * (1.0 * 0.25) / Math.PI,
+      phase: [0.0, 0.5, 0.25, 0.75],
+    },
+    trot: {
+      T: 0.6, swingRatio: 0.5,
+      strideTime: 0.6 * 0.25,
+      maxStride: 0.032,
+      phase: [0.0, 0.5, 0.0, 0.5],
+    },
+  },
+  bodyX: [0.09, -0.09, -0.09, 0.09],   // LF, LB, RB, RF 肩点纵向位置（示意值）
+  names: ['LF', 'LB', 'RB', 'RF'],
+  colors: ['#ff5a5a', '#5aa8ff', '#4dff88', '#ffb84d'],
+};
+
+// ============ 仿真状态（与 Gait 类一致） ============
+const sim = {
+  gait: 'walk',
+  vx: 0.2,
+  t: 0.0,
+  y: [0, 0, 0, 0],
+  yStart: [0, 0, 0, 0],
+  entered: [false, false, false, false],
+  trails: [[], [], [], []],          // 每腿 {x, z, swing}
+  sigY: [], sigZ: [], sigT: [],      // LF 腿 y(t)/z(t)
+  kneeAngle: 0.0,                    // 腿0 有效舵机角（度数）
+  kneeSwingActive: false,            // 腿0 摆动窗口内的角度扫描统计
+  kneeSwingStart: 0.0,
+  kneeMin: 0.0,
+  kneeMax: 0.0,
+  kneeSweepRate: 0.0,                // 最近一次摆动窗口的平均扫过速率 (°/s)
+};
+
+const TRAIL_CAP = 1200;
+
+function softReset() {
+  sim.t = 0.0;
+  sim.y = [0, 0, 0, 0];
+  sim.yStart = [0, 0, 0, 0];
+  sim.entered = [false, false, false, false];
+  sim.trails = [[], [], [], []];
+  sim.sigY = []; sim.sigZ = []; sim.sigT = [];
+  sim.kneeAngle = 0.0;
+  sim.kneeSwingActive = false;
+  sim.kneeSwingStart = 0.0;
+  sim.kneeMin = 0.0;
+  sim.kneeMax = 0.0;
+  sim.kneeSweepRate = 0.0;
+}
+
+// ============ step_cycle 端口（500Hz，dt=0.002） ============
+function stepCycle(dt) {
+  const p = G.gait[sim.gait];
+  sim.t += dt;
+
+  for (let i = 0; i < 4; i++) {
+    const v = Math.min(Math.max(sim.vx, -G.kMaxFootSpeed), G.kMaxFootSpeed);
+    const stride = Math.min(Math.max(v * p.strideTime, -p.maxStride), p.maxStride);
+
+    let s = (sim.t / p.T + p.phase[i]) % 1.0;
+    if (s < 0) s += 1.0;
+
+    let y, z;
+    if (Math.abs(stride) < 1e-6) {
+      sim.y[i] = 0.0;
+      sim.entered[i] = false;
+      y = 0.0; z = G.kStanceZ;
+    } else if (s < p.swingRatio) {
+      if (!sim.entered[i]) { sim.yStart[i] = sim.y[i]; sim.entered[i] = true; }
+      const u = s / p.swingRatio;
+      const profile = 0.5 * (1 - Math.cos(Math.PI * u));
+      const lift = 0.5 * (1 - Math.cos(2 * Math.PI * u));
+      sim.y[i] = sim.yStart[i] + (stride - sim.yStart[i]) * profile;
+      y = sim.y[i]; z = G.kStanceZ + G.kStepHeight * lift;
+    } else {
+      sim.entered[i] = false;
+      sim.y[i] = Math.min(Math.max(sim.y[i] - v * dt, -p.maxStride), p.maxStride);
+      y = sim.y[i]; z = G.kStanceZ;
+    }
+
+    const trail = sim.trails[i];
+    trail.push({ y, z, swing: sim.entered[i] });
+    if (trail.length > TRAIL_CAP) trail.shift();
+  }
+
+  // LF 腿信号
+  const f0 = sim.trails[0][sim.trails[0].length - 1];
+  sim.sigT.push(sim.t); sim.sigY.push(f0.y); sim.sigZ.push(f0.z);
+  if (sim.sigT.length > TRAIL_CAP) { sim.sigT.shift(); sim.sigY.shift(); sim.sigZ.shift(); }
+
+  // 膝舵机摆动窗口平均扫过速率（腿0，有效舵机角 = PWM 反解）
+  const eff = kneeEffectiveDeg(f0.y, f0.z);
+  sim.kneeAngle = eff;
+  if (sim.entered[0]) {
+    if (!sim.kneeSwingActive) {
+      sim.kneeSwingActive = true;
+      sim.kneeSwingStart = sim.t;
+      sim.kneeMin = eff;
+      sim.kneeMax = eff;
+    }
+    sim.kneeMin = Math.min(sim.kneeMin, eff);
+    sim.kneeMax = Math.max(sim.kneeMax, eff);
+  } else if (sim.kneeSwingActive) {
+    const dur = sim.t - sim.kneeSwingStart;
+    if (dur > 0.01) sim.kneeSweepRate = (sim.kneeMax - sim.kneeMin) / dur;
+    sim.kneeSwingActive = false;
+  }
+}
+
+// ============ 膝连杆 φ(r)（leg_solver.hpp + 真实参数） ============
+function kneeEffectiveDeg(y, z) {
+  const L1 = 0.08955, L2 = 0.09054;
+  const a = 0.01929, b = 0.02417, c = 0.073, d = 0.0757; // delta=0, fork=false
+  let r = Math.hypot(y, z);
+  r = Math.min(Math.max(r, Math.abs(L1 - L2)), L1 + L2);
+  let ck = (r * r - L1 * L1 - L2 * L2) / (2 * L1 * L2);
+  ck = Math.min(Math.max(ck, -1), 1);
+  const kg = Math.acos(ck);
+  const psi = Math.PI - kg;
+  const B = 2 * a * (d + b * Math.cos(psi));
+  const C = a * a + b * b + d * d - c * c + 2 * b * d * Math.cos(psi);
+  const norm = Math.abs(B);
+  const ratio = norm > 0 ? Math.min(Math.max(C / norm, -1), 1) : 0;
+  const phi = Math.atan2(B, 0) - Math.acos(ratio);
+  const pwm = Math.min(Math.max(phi * 180 / Math.PI / 270 * 2000 + 1100, 1100), 1600);
+  return (pwm - 1100) / 2000 * 270;
+}
+
+// ============ 画布 ============
+const cvSide = document.getElementById('cvSide');
+const cvPath = document.getElementById('cvPath');
+const cvSig  = document.getElementById('cvSignals');
+const sctx = cvSide.getContext('2d');
+const pctx = cvPath.getContext('2d');
+const gctx = cvSig.getContext('2d');
+
+function worldToScreen(cv, wx, wy, wx0, wx1, wy0, wy1) {
+  const m = 36;
+  const sx = (wx - wx0) / (wx1 - wx0) * (cv.width - 2 * m) + m;
+  const sy = (wy1 - wy) / (wy1 - wy0) * (cv.height - 2 * m) + m;
+  return [sx, sy];
+}
+
+function drawSide() {
+  const cv = cvSide, ctx = sctx;
+  ctx.clearRect(0, 0, cv.width, cv.height);
+  ctx.fillStyle = '#141a20';
+  ctx.fillRect(0, 0, cv.width, cv.height);
+
+  // 地面线（站立位 z=kStanceZ）
+  let [gx0, gy] = worldToScreen(cv, -0.125, -G.kStanceZ, -0.125, 0.125, -0.135, 0.03);
+  let [gx1] = worldToScreen(cv, 0.125, -G.kStanceZ, -0.125, 0.125, -0.135, 0.03);
+  ctx.strokeStyle = '#2b3642';
+  ctx.lineWidth = 1;
+  ctx.setLineDash([4, 4]);
+  ctx.beginPath(); ctx.moveTo(gx0, gy); ctx.lineTo(gx1, gy); ctx.stroke();
+  ctx.setLineDash([]);
+
+  // 机体
+  let [bx0, by] = worldToScreen(cv, -0.1, 0, -0.125, 0.125, -0.135, 0.03);
+  let [bx1] = worldToScreen(cv, 0.1, 0, -0.125, 0.125, -0.135, 0.03);
+  ctx.strokeStyle = '#8a97a3';
+  ctx.lineWidth = 3;
+  ctx.beginPath(); ctx.moveTo(bx0, by); ctx.lineTo(bx1, by); ctx.stroke();
+
+  // 足端轨迹与点
+  for (let i = 0; i < 4; i++) {
+    const trail = sim.trails[i];
+    if (trail.length < 2) continue;
+    const n = trail.length;
+    for (let k = 0; k < n - 1; k++) {
+      const a = trail[k], b = trail[k + 1];
+      const [ax, ay] = worldToScreen(cv, G.bodyX[i] + a.y, -a.z, -0.125, 0.125, -0.135, 0.03);
+      const [bx2, by2] = worldToScreen(cv, G.bodyX[i] + b.y, -b.z, -0.125, 0.125, -0.135, 0.03);
+      const alpha = 0.06 + 0.5 * k / n;
+      ctx.strokeStyle = G.colors[i] + Math.round(alpha * 255).toString(16).padStart(2, '0');
+      ctx.lineWidth = 1.5;
+      ctx.beginPath(); ctx.moveTo(ax, ay); ctx.lineTo(bx2, by2); ctx.stroke();
+    }
+    const foot = trail[n - 1];
+    const [fx, fy] = worldToScreen(cv, G.bodyX[i] + foot.y, -foot.z, -0.125, 0.125, -0.135, 0.03);
+    ctx.fillStyle = G.colors[i];
+    ctx.beginPath(); ctx.arc(fx, fy, foot.swing ? 6.5 : 4, 0, Math.PI * 2); ctx.fill();
+    // 肩点
+    const [sx2, sy2] = worldToScreen(cv, G.bodyX[i], 0, -0.125, 0.125, -0.135, 0.03);
+    ctx.strokeStyle = G.colors[i];
+    ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.arc(sx2, sy2, 3, 0, Math.PI * 2); ctx.stroke();
+    if (foot.swing) {
+      ctx.strokeStyle = G.colors[i];
+      ctx.lineWidth = 1.5;
+      ctx.beginPath(); ctx.arc(fx, fy, 9, 0, Math.PI * 2); ctx.stroke();
+    }
+  }
+  // 图例
+  const legend = document.getElementById('legend');
+  legend.innerHTML = G.names.map((n, i) =>
+    `<span><span class="dot" style="background:${G.colors[i]}"></span>${n}</span>`).join('');
+}
+
+function drawPath() {
+  const cv = cvPath, ctx = pctx;
+  ctx.clearRect(0, 0, cv.width, cv.height);
+  ctx.fillStyle = '#141a20';
+  ctx.fillRect(0, 0, cv.width, cv.height);
+  const X0 = -0.06, X1 = 0.06, Y0 = -0.135, Y1 = -0.07;
+  // 网格
+  ctx.strokeStyle = '#222c36'; ctx.lineWidth = 1;
+  for (let x = X0; x <= X1 + 1e-9; x += 0.02) {
+    const [gx] = worldToScreen(cv, x, Y0, X0, X1, Y0, Y1);
+    ctx.beginPath(); ctx.moveTo(gx, 30); ctx.lineTo(gx, cv.height - 10); ctx.stroke();
+  }
+  for (let z = Y0; z <= Y1 + 1e-9; z += 0.01) {
+    const [, gy] = worldToScreen(cv, X0, z, X0, X1, Y0, Y1);
+    ctx.beginPath(); ctx.moveTo(26, gy); ctx.lineTo(cv.width - 20, gy); ctx.stroke();
+  }
+  for (let i = 0; i < 4; i++) {
+    const trail = sim.trails[i];
+    if (trail.length < 2) continue;
+    const n = trail.length;
+    for (let k = 0; k < n - 1; k++) {
+      const a = trail[k], b = trail[k + 1];
+      const [ax, ay] = worldToScreen(cv, a.y, -a.z, X0, X1, Y0, Y1);
+      const [bx, by] = worldToScreen(cv, b.y, -b.z, X0, X1, Y0, Y1);
+      ctx.strokeStyle = G.colors[i] + '66';
+      ctx.lineWidth = 1.5;
+      ctx.beginPath(); ctx.moveTo(ax, ay); ctx.lineTo(bx, by); ctx.stroke();
+    }
+    const foot = trail[n - 1];
+    const [fx, fy] = worldToScreen(cv, foot.y, -foot.z, X0, X1, Y0, Y1);
+    ctx.fillStyle = G.colors[i];
+    ctx.beginPath(); ctx.arc(fx, fy, 3.5, 0, Math.PI * 2); ctx.fill();
+  }
+}
+
+function drawSignals() {
+  const cv = cvSig, ctx = gctx;
+  ctx.clearRect(0, 0, cv.width, cv.height);
+  ctx.fillStyle = '#141a20';
+  ctx.fillRect(0, 0, cv.width, cv.height);
+  const W = cv.width, H = cv.height;
+  const t0 = sim.t - 1.2;
+  const px = (t) => (t - t0) / 1.2 * W;
+  const yTop = 40, yBot = H / 2, zTop = H / 2 + 40, zBot = H - 10;
+  const yOf = (y) => yTop + (0.05 - Math.min(Math.max(y, -0.05), 0.05)) / 0.1 * (yBot - yTop);
+  const zOf = (z) => zTop + (0.13 - Math.min(Math.max(z, 0.07), 0.13)) / 0.06 * (zBot - zTop);
+
+  ctx.strokeStyle = '#222c36'; ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.moveTo(0, yBot); ctx.lineTo(W, yBot); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(0, zTop); ctx.lineTo(W, zTop); ctx.stroke();
+
+  if (sim.sigT.length > 1) {
+    ctx.strokeStyle = G.colors[0]; ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    for (let k = 0; k < sim.sigT.length; k++) {
+      const x = px(sim.sigT[k]);
+      if (x < -10) continue;
+      const y = yOf(sim.sigY[k]);
+      k === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+    }
+    ctx.stroke();
+    ctx.strokeStyle = '#ffb84d'; ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    for (let k = 0; k < sim.sigT.length; k++) {
+      const x = px(sim.sigT[k]);
+      if (x < -10) continue;
+      const y = zOf(sim.sigZ[k]);
+      k === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+    }
+    ctx.stroke();
+  }
+  ctx.fillStyle = '#6b7680'; ctx.font = '12px monospace';
+  ctx.fillText('y(t)', 8, yTop - 8);
+  ctx.fillText('z(t)', 8, zTop - 8);
+}
+
+// ============ 控制 ============
+const el = {
+  vx: document.getElementById('vxSlider'),
+  vxVal: document.getElementById('vxVal'),
+  speed: document.getElementById('speedSlider'),
+  speedVal: document.getElementById('speedVal'),
+  pause: document.getElementById('btnPause'),
+  reset: document.getElementById('btnReset'),
+  btnWalk: document.getElementById('btnWalk'),
+  btnTrot: document.getElementById('btnTrot'),
+  kneeVal: document.getElementById('kneeVal'),
+  kneeFill: document.getElementById('kneeFill'),
+  paramInfo: document.getElementById('paramInfo'),
+};
+let playing = true;
+let speed = 1.0;
+let lastNow = null;
+
+function setGait(name) {
+  sim.gait = name;
+  el.btnWalk.classList.toggle('active', name === 'walk');
+  el.btnTrot.classList.toggle('active', name === 'trot');
+  softReset();
+  updateParamInfo();
+}
+
+function updateParamInfo() {
+  const p = G.gait[sim.gait];
+  el.paramInfo.textContent =
+    `${sim.gait === 'walk' ? 'Walk' : 'Trot'}：周期 T=${p.T}s，摆动 ${(p.T * p.swingRatio).toFixed(2)}s，` +
+    `步幅上限 ${p.maxStride.toFixed(4)}m，速度上限 ${(p.maxStride / p.strideTime).toFixed(3)}m/s，` +
+    `相位 [${p.phase.join(', ')}]`;
+}
+
+el.vx.addEventListener('input', () => { sim.vx = parseFloat(el.vx.value); el.vxVal.textContent = sim.vx.toFixed(3); });
+el.speed.addEventListener('input', () => { speed = parseFloat(el.speed.value); el.speedVal.textContent = speed.toFixed(2); });
+el.pause.addEventListener('click', () => { playing = !playing; el.pause.textContent = playing ? '暂停' : '继续'; });
+el.reset.addEventListener('click', softReset);
+el.btnWalk.addEventListener('click', () => setGait('walk'));
+el.btnTrot.addEventListener('click', () => setGait('trot'));
+
+// ============ 主循环 ============
+function frame(now) {
+  if (lastNow === null) lastNow = now;
+  const realDt = Math.min(now - lastNow, 100);
+  lastNow = now;
+
+  if (playing) {
+    let ticks = Math.round(realDt / 1000 * speed / 0.002);
+    ticks = Math.min(ticks, 400);
+    for (let k = 0; k < ticks; k++) stepCycle(0.002);
+  }
+
+  let rate = sim.kneeSwingActive
+    ? (sim.kneeMax - sim.kneeMin) / Math.max(sim.t - sim.kneeSwingStart, 1e-6)
+    : sim.kneeSweepRate;
+  el.kneeVal.textContent = rate.toFixed(0);
+  el.kneeFill.style.width = Math.min(rate / G.kneeLimitDeg * 100, 100) + '%';
+
+  drawSide();
+  drawPath();
+  drawSignals();
+  requestAnimationFrame(frame);
+}
+
+softReset();
+updateParamInfo();
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>

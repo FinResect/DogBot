@@ -9,7 +9,7 @@
 
 namespace dogbot_core::controller {
 
-enum class GaitType { Stand, Trot, Spin, Climb, TrotSpinMix };
+enum class GaitType { Stand, Trot, Walk, Spin, Climb, TrotSpinMix };
 
 // 步态引擎：速度级增量积分。
 //
@@ -20,49 +20,57 @@ enum class GaitType { Stand, Trot, Spin, Climb, TrotSpinMix };
 //    舵机 ID 顺序一致（knee/hip ID: 0/1=LF, 2/3=LB, 4/5=RB, 6/7=RF）。
 //  - kBodyY[i] 为各腿肩点相对机体中心的横向杠杆臂：左腿 (LF/LB) 为 +0.05，右腿
 //    (RB/RF) 为 -0.05，符号决定 spin 的差动方向，请勿改动。
-//  - 支撑相足端速度 v_i = vx_eff - omega_eff * kBodyY[i]：trot 只启用 vx，spin 只启用
-//    omega，trot_spin_mix 在速度层线性叠加两者。单周期足端行程恒为指令速度的积分，
-//    因此融合天然不会产生双倍行程（增量叠加）。
+//  - 支撑相足端速度 v_i = vx_eff - omega_eff * kBodyY[i]：trot / walk 只启用 vx，
+//    spin 只启用 omega，trot_spin_mix 在速度层线性叠加两者。单周期足端行程恒为指令
+//    速度的积分，因此融合天然不会产生双倍行程（增量叠加）。
+//  - walk 为 4 拍爬行步态（摆动占比 1/4，任意时刻仅 1 足摆动、3 足支撑），独立周期
+//    1.0s 保证摆动窗口内舵机转速不超限（128°/s < 187.5°/s），速度上限约 0.068 m/s，
+//    约为 trot 的 1/3。
 class Gait {
 public:
     // 切换步态并软复位（时钟、足端积分器、爬楼状态清零），避免切换瞬间相位跳变。
-    void setGaitType(GaitType type) {
+    void set_gait_type(GaitType type) {
         type_ = type;
-        softReset();
+        soft_reset();
     }
 
-    // 设置步态指令参数，仅 trot / spin / trot_spin_mix 有意义：
+    // 设置步态指令参数，仅 trot / spin / walk / trot_spin_mix 有意义：
     //  - trot：仅 vx 生效，omega 被忽略
     //  - spin：仅 omega 生效，vx 被忽略
+    //  - walk：仅 vx 生效，omega 被忽略（同 trot）
     //  - trot_spin_mix：vx 与 omega 在支撑相速度层叠加
     // stand / climb 忽略两个参数。
-    void setGaitParam(double vx, double omega) {
+    void set_gait_param(double vx, double omega) {
         vx_    = vx;
         omega_ = omega;
     }
 
     // 复位全部状态，下次 update() 起回到站立姿态（步态类型保持不变）。
-    void reset() { softReset(); }
+    void reset() { soft_reset(); }
 
     // 统一对外接口：按当前步态类型推进 dt 秒，返回 4 条腿的足端坐标（腿序见类注释）。
     // dt 限幅 0.05s：防止调用方传入异常大 dt 导致相位快进（单次最多 1/12 周期），
     // 也限制 Climb 一次调用最多推进一个阶段（0.05 < 阶段时长 0.8s）。
+    // 按步态类型 switch 分流到各步态专属更新函数。
     std::array<Eigen::Vector3d, 4> update(double dt) {
         if (dt <= 0.0) {
             return feet_;
         }
         dt = std::min(dt, 0.05);
-        if (type_ == GaitType::Climb) {
-            climbUpdate(dt);
-        } else {
-            cyclicUpdate(dt);
+        switch (type_) {
+        case GaitType::Stand: stand_update(); break;
+        case GaitType::Trot: trot_update(dt); break;
+        case GaitType::Walk: walk_update(dt); break;
+        case GaitType::Spin: spin_update(dt); break;
+        case GaitType::Climb: climb_update(dt); break;
+        case GaitType::TrotSpinMix: trot_spin_mix_update(dt); break;
         }
         return feet_;
     }
 
 private:
-    static constexpr double kStanceZ    = 0.08; // 站立时足端离髋竖直距离 (m)
-    static constexpr double kStepHeight = 0.04; // 摆动相抬脚高度 (m)
+    static constexpr double kStanceZ    = 0.16; // 站立时足端离髋竖直距离 (m)
+    static constexpr double kStepHeight = 0.08; // 摆动相抬脚高度 (m)
     static constexpr double kPeriod     = 0.6;  // 步态周期 (s)
     // 足端最大速度 (m/s)：由舵机最大转速 187.5°/s (0.32s/60°) 反推——
     // 髋到足距离取保守值 r=0.114，留 ~14% 余量。支撑相足端速度 = 指令速度，
@@ -80,6 +88,19 @@ private:
     // 各腿肩点横向杠杆臂：左腿 +0.05，右腿 -0.05。
     static constexpr std::array<double, 4> kBodyY{0.05, 0.05, -0.05, -0.05};
 
+    // walk 为 4 拍爬行步态：与 trot 相同的对角配对（LF+RB、LB+RF）组内错开
+    // 1/4 周期，任意时刻仅 1 足摆动、3 足支撑（静态稳定）。
+    static constexpr std::array<double, 4> kWalkPhase{0.0, 0.5, 0.25, 0.75};
+    // 周期 1.0s：摆动相 0.25s，膝舵机需在摆动窗口内扫过 ~32°，即 128°/s，低于
+    // 187.5°/s 上限；若沿用 0.6s 周期则摆动仅 0.15s（213°/s），小腿跟不上、几乎不动。
+    static constexpr double kWalkPeriod = 1.0;
+    static constexpr double kWalkSwingRatio = 0.25; // 摆动相占周期比例（与相位差一致）
+    static constexpr double kWalkStrideTime = kWalkPeriod * (1.0 - kWalkSwingRatio) * 0.5;
+    // 摆动相峰值速度 = pi*stride/T_swing，由 kMaxFootSpeed 反推步幅上限 ≈ 0.0255
+    // （同 kMaxStride 推导）。
+    static constexpr double kWalkMaxStride =
+        kMaxFootSpeed * (kWalkPeriod * kWalkSwingRatio) / std::numbers::pi;
+
     static constexpr double kClimbStepHeight = 0.03; // 每级台阶升高 (m)
     static constexpr double kClimbReach      = 0.04; // 上台阶时落足前伸距离 (m)
     static constexpr double kClimbPhaseTime  = 0.8;  // 每个爬楼阶段时长 (s)
@@ -89,30 +110,24 @@ private:
     static constexpr int kShiftPhase         = 2;    // shift 阶段在 climb_phase_ 中的序号
     static constexpr int kSettlePhase        = 5;    // settle 阶段在 climb_phase_ 中的序号
 
-    // stand/trot/spin/trot_spin_mix 共用：速度级增量积分。
-    std::array<Eigen::Vector3d, 4> cyclicUpdate(double dt) {
-        if (type_ == GaitType::Stand) {
-            for (int i = 0; i < 4; ++i) {
-                y_[i]    = 0.0;
-                feet_[i] = Eigen::Vector3d(0.0, 0.0, kStanceZ);
-            }
-            return feet_;
-        }
-
+    // 速度级增量积分核心：按调用方传入的步态参数推进一个控制周期（dt 已限幅）。
+    // 支撑相足端速度 = vx 项 + omega 项（速度层叠加，由 use_vx/use_omega 决定是否
+    // 启用，trot 只开 vx、spin 只开 omega、trot_spin_mix 双开），速度级钳制到
+    // kMaxFootSpeed，防止支撑相滑动速度超出舵机跟踪能力。stride_time/max_stride 为
+    // 单腿行程及其限幅（摆动相峰值速度 = pi*stride/T_swing，由 kMaxFootSpeed 反推），
+    // 摆动目标与支撑相积分共用该限幅，避免两者不对称导致摆动幅度放大、速度再次超限。
+    void step_cycle(
+        double dt, double period, const std::array<double, 4>& phase, double swing_ratio,
+        double stride_time, double max_stride, bool use_vx, bool use_omega) {
         t_ += dt;
 
-        const bool use_vx    = type_ != GaitType::Spin;
-        const bool use_omega = type_ != GaitType::Trot;
-
         for (int i = 0; i < 4; ++i) {
-            // 支撑相足端速度 = trot 项 + spin 项（速度层叠加，v_i*T/4 即单行程），
-            // 速度级钳制到 kMaxFootSpeed，防止支撑相滑动速度超出舵机跟踪能力。
             const double v_i = std::clamp(
                 (use_vx ? vx_ : 0.0) - (use_omega ? omega_ : 0.0) * kBodyY[i], -kMaxFootSpeed,
                 kMaxFootSpeed);
-            const double stride = std::clamp(v_i * kStrideTime, -kMaxStride, kMaxStride);
+            const double stride = std::clamp(v_i * stride_time, -max_stride, max_stride);
 
-            double s = std::fmod(t_ / kPeriod + kTrotPhase[i], 1.0);
+            double s = std::fmod(t_ / period + phase[i], 1.0);
             if (s < 0.0) {
                 s += 1.0;
             }
@@ -122,33 +137,58 @@ private:
                 y_[i]             = 0.0;
                 swing_entered_[i] = false;
                 feet_[i]          = Eigen::Vector3d(0.0, 0.0, kStanceZ);
-            } else if (s < kSwingRatio) {
+            } else if (s < swing_ratio) {
                 // 摆动相：从摆动起始偏移平滑摆向目标落点 stride（目标逐帧重规划，
                 // 速度变化不产生足端跳变），同时抬脚。
                 if (!swing_entered_[i]) {
                     y_start_[i]       = y_[i];
                     swing_entered_[i] = true;
                 }
-                const double u       = s / kSwingRatio;
+                const double u       = s / swing_ratio;
                 const double profile = 0.5 * (1.0 - std::cos(std::numbers::pi * u));
                 // 双余弦抬脚弧：两端高度与斜率均为 0，摆动/支撑切换处无跳变
                 // （单余弦 arc 在离散相位结束时残留 ~0.6mm 台阶）。
                 const double lift = 0.5 * (1.0 - std::cos(2.0 * std::numbers::pi * u));
                 y_[i]             = y_start_[i] + (stride - y_start_[i]) * profile;
-                feet_[i]          = Eigen::Vector3d(0.0, y_[i], kStanceZ + kStepHeight * lift);
+                feet_[i]          = Eigen::Vector3d(0.0, y_[i], kStanceZ - kStepHeight * lift);
             } else {
                 // 支撑相：足端相对机体按指令速度积分（后退），抬脚高度回落到站立位。
                 swing_entered_[i] = false;
-                y_[i]             = std::clamp(y_[i] - v_i * dt, -kMaxStride, kMaxStride);
+                y_[i]             = std::clamp(y_[i] - v_i * dt, -max_stride, max_stride);
                 feet_[i]          = Eigen::Vector3d(0.0, y_[i], kStanceZ);
             }
         }
-        return feet_;
+    }
+
+    // stand：保持站立位，不推进周期时钟。
+    void stand_update() {
+        for (int i = 0; i < 4; ++i) {
+            y_[i]    = 0.0;
+            feet_[i] = Eigen::Vector3d(0.0, 0.0, kStanceZ);
+        }
+    }
+
+    // trot / spin / trot_spin_mix：同一速度级增量积分，仅速度项开关不同。
+    void trot_update(double dt) {
+        step_cycle(dt, kPeriod, kTrotPhase, kSwingRatio, kStrideTime, kMaxStride, true, false);
+    }
+    void spin_update(double dt) {
+        step_cycle(dt, kPeriod, kTrotPhase, kSwingRatio, kStrideTime, kMaxStride, false, true);
+    }
+    void trot_spin_mix_update(double dt) {
+        step_cycle(dt, kPeriod, kTrotPhase, kSwingRatio, kStrideTime, kMaxStride, true, true);
+    }
+
+    // walk：4 拍爬行步态，仅 vx 生效（不支持转弯）。
+    void walk_update(double dt) {
+        step_cycle(
+            dt, kWalkPeriod, kWalkPhase, kWalkSwingRatio, kWalkStrideTime, kWalkMaxStride, true,
+            false);
     }
 
     // 爬楼梯：6 阶段状态机（RF→LF→Shift→RB→LB→Settle），每阶段前半段抬单腿到升高
     // 后的落点，其余腿驻留在各自落点；完成全部台阶后保持最终姿态，不自动回落。
-    void climbUpdate(double dt) {
+    void climb_update(double dt) {
         if (climb_done_) {
             return;
         }
@@ -160,7 +200,7 @@ private:
                 climb_phase_ = 0;
                 if (++climb_step_ >= kClimbSteps) {
                     climb_done_ = true;
-                    holdClimbPose();
+                    hold_climb_pose();
                     return;
                 }
             }
@@ -176,21 +216,21 @@ private:
 
         const double p = phase_elapsed_ / kClimbPhaseTime;
         switch (climb_phase_) {
-        case 0: climbLeg(3, p); break; // right_front
-        case 1: climbLeg(0, p); break; // left_front
-        case 2: shiftBody(p); break;
-        case 3: climbLeg(2, p); break; // right_back
-        case 4: climbLeg(1, p); break; // left_back
+        case 0: climb_leg(3, p); break; // right_front
+        case 1: climb_leg(0, p); break; // left_front
+        case 2: shift_body(p); break;
+        case 3: climb_leg(2, p); break; // right_back
+        case 4: climb_leg(1, p); break; // left_back
         case 5: settle(p); break;
         default: break;
         }
     }
 
     // 当前台阶的地面高度与上一级台阶（目标）高度，z 向下为正。
-    double zFloor() const { return kStanceZ - kClimbStepHeight * climb_step_; }
-    double zNext() const { return zFloor() - kClimbStepHeight; }
+    double z_floor() const { return kStanceZ - kClimbStepHeight * climb_step_; }
+    double z_next() const { return z_floor() - kClimbStepHeight; }
 
-    void climbLeg(int climber, double p) {
+    void climb_leg(int climber, double p) {
         const double sp = std::min(p / kClimbSwingRatio, 1.0);
 
         for (int i = 0; i < 4; ++i) {
@@ -199,11 +239,11 @@ private:
                 const double z_from = foothold_[i].z();
                 // 沿弧线从当前落点摆到 (kClimbReach, zNext)，抬脚弧高 kClimbStepHeight。
                 const double y = y_from + (kClimbReach - y_from) * sp;
-                const double z = z_from + (zNext() - z_from) * sp
+                const double z = z_from + (z_next() - z_from) * sp
                                - kClimbStepHeight * std::sin(std::numbers::pi * sp);
                 feet_[i] = Eigen::Vector3d(0.0, y, z);
                 if (p >= kClimbSwingRatio) {
-                    foothold_[i] = Eigen::Vector3d(0.0, kClimbReach, zNext());
+                    foothold_[i] = Eigen::Vector3d(0.0, kClimbReach, z_next());
                 }
             } else {
                 feet_[i] = Eigen::Vector3d(0.0, foothold_[i].y(), foothold_[i].z());
@@ -212,7 +252,7 @@ private:
     }
 
     // 机体前移：全部落点相对进入 shift 时的起点统一后移 reach/2（绝对位置，不累加）。
-    void shiftBody(double p) {
+    void shift_body(double p) {
         for (int i = 0; i < 4; ++i) {
             const double y   = phase_base_y_[i] - kClimbReach * 0.5 * p;
             foothold_[i].y() = y;
@@ -224,19 +264,19 @@ private:
     void settle(double p) {
         for (int i = 0; i < 4; ++i) {
             const double y = phase_base_y_[i] + (0.0 - phase_base_y_[i]) * p;
-            const double z = phase_base_z_[i] + (zNext() - phase_base_z_[i]) * p;
+            const double z = phase_base_z_[i] + (z_next() - phase_base_z_[i]) * p;
             foothold_[i]   = Eigen::Vector3d(0.0, y, z);
             feet_[i]       = Eigen::Vector3d(0.0, y, z);
         }
     }
 
-    void holdClimbPose() {
+    void hold_climb_pose() {
         for (auto& f : feet_) {
-            f = Eigen::Vector3d(0.0, 0.0, zFloor());
+            f = Eigen::Vector3d(0.0, 0.0, z_floor());
         }
     }
 
-    void softReset() {
+    void soft_reset() {
         t_ = 0.0;
         y_.fill(0.0);
         y_start_.fill(0.0);

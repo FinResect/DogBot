@@ -10,8 +10,11 @@
 #include <geometry_msgs/msg/twist.hpp>
 #include <memory>
 #include <numbers>
+#include <rclcpp/publisher.hpp>
 #include <rclcpp/rclcpp.hpp>
 #include <rclcpp_components/register_node_macro.hpp>
+#include <std_msgs/msg/bool.hpp>
+#include <std_msgs/msg/detail/bool__struct.hpp>
 #include <std_msgs/msg/float64.hpp>
 #include <string>
 
@@ -43,6 +46,9 @@ public:
             "/vision/following/theta", 10,
             [this](const std_msgs::msg::Float64::SharedPtr msg) { theta_ = msg->data; });
 
+        pub_thrower_left_  = create_publisher<std_msgs::msg::Bool>("/thrower/left/enable", 10);
+        pub_thrower_right_ = create_publisher<std_msgs::msg::Bool>("/thrower/right/enable", 10);
+
         static constexpr const char* kLegNames[4] = {
             "left_front", "left_back", "right_back", "right_front"};
         for (int i = 0; i < 4; ++i) {
@@ -58,12 +64,23 @@ public:
 
 private:
     void update() {
+
+        std_msgs::msg::Bool left_msg;
+        std_msgs::msg::Bool right_msg;
+
+        left_msg.data  = false;
+        right_msg.data = false;
+
+        pub_thrower_left_->publish(left_msg);
+        pub_thrower_right_->publish(right_msg);
+
         using namespace dogbot_msg::msg;
 
         auto button_x       = gamepad_state_.buttons.x;
         auto button_y       = gamepad_state_.buttons.y;
         auto button_a       = gamepad_state_.buttons.a;
         auto button_b       = gamepad_state_.buttons.b;
+        auto button_up      = gamepad_state_.dpad.up;
         auto button_start   = gamepad_state_.buttons.start;
         auto button_mode    = gamepad_state_.buttons.mode;
         auto joystick_left  = gamepad_state_.sticks.joystick_left;
@@ -78,19 +95,22 @@ private:
         }
 
         if (button_start && !last_button_start) {
-            gait_.setGaitType(GaitType::Stand);
+            gait_.set_gait_type(GaitType::Stand);
             controller_mode_ = dogbot_msg::ControllerMode::Auto;
         } else if (button_x && !last_button_x) {
-            gait_.setGaitType(GaitType::Trot);
+            gait_.set_gait_type(GaitType::Trot);
             controller_mode_ = dogbot_msg::ControllerMode::Auto;
         } else if (button_y && !last_button_y) {
-            gait_.setGaitType(GaitType::TrotSpinMix);
+            gait_.set_gait_type(GaitType::TrotSpinMix);
             controller_mode_ = dogbot_msg::ControllerMode::Manual;
         } else if (button_a && !last_button_a) {
-            gait_.setGaitType(GaitType::Climb);
-            controller_mode_ = dogbot_msg::ControllerMode::Auto;
+            gait_.set_gait_type(GaitType::Walk);
+            controller_mode_ = dogbot_msg::ControllerMode::Manual;
         } else if (button_b && !last_button_b) {
-            gait_.setGaitType(GaitType::Spin);
+            gait_.set_gait_type(GaitType::Spin);
+            controller_mode_ = dogbot_msg::ControllerMode::Auto;
+        } else if (button_up && !last_button_up) {
+            gait_.set_gait_type(GaitType::Climb);
             controller_mode_ = dogbot_msg::ControllerMode::Auto;
         }
 
@@ -106,6 +126,7 @@ private:
         last_button_b     = button_b;
         last_button_x     = button_x;
         last_button_y     = button_y;
+        last_button_up    = button_up;
         last_button_start = button_start;
         last_button_mode  = button_mode;
     }
@@ -126,7 +147,7 @@ private:
 
     std::array<Eigen::Vector3d, 4> feet_update(double vx, double omega) {
 
-        gait_.setGaitParam(vx, omega);
+        gait_.set_gait_param(vx, omega);
         return gait_.update(dt_);
     }
 
@@ -138,6 +159,9 @@ private:
             std_msgs::msg::Float64 knee_msg;
             hip_msg.data  = angles.hip * 180.0 / std::numbers::pi;
             knee_msg.data = angles.knee * 180.0 / std::numbers::pi;
+            if (!i) {
+                hip_msg.data += 5.0;
+            }
 
             pub_hip_[i]->publish(hip_msg);
             pub_knee_[i]->publish(knee_msg);
@@ -153,6 +177,7 @@ private:
     uint8_t last_button_y;
     uint8_t last_button_a;
     uint8_t last_button_b;
+    uint8_t last_button_up;
     uint8_t last_button_start;
     uint8_t last_button_mode;
 
@@ -163,6 +188,8 @@ private:
     rclcpp::Subscription<std_msgs::msg::Float64>::SharedPtr theta_sub_;
     rclcpp::Publisher<std_msgs::msg::Float64>::SharedPtr pub_hip_[4];
     rclcpp::Publisher<std_msgs::msg::Float64>::SharedPtr pub_knee_[4];
+    rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr pub_thrower_left_;
+    rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr pub_thrower_right_;
     rclcpp::TimerBase::SharedPtr timer_;
 };
 

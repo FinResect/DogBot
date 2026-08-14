@@ -6,6 +6,8 @@
 #include <string>
 #include <thread>
 
+#include "device/IMU660RB.hpp"
+#include "device/TD-8120MG.hpp"
 #include "device/ZX30S.hpp"
 #include "device/gamepad.hpp"
 #include "serial/serial.hpp"
@@ -18,6 +20,15 @@ public:
         , serial_("/dev/ttyAMA0", 1000000) {
 
         gamepad_.init(this, "/remote", "/dev/input/js0");
+
+        imu_.init(this, "/imu");
+        imu_.set_coordinate_mapping(
+            [](double x, double y, double z) { return std::make_tuple(y, -x, +z); });
+
+        thrower_left_.init(this, "/thrower/left", 12);
+        thrower_right_.init(this, "/thrower/right", 18);
+        thrower_left_.set_angle(155, 100);
+        thrower_right_.set_angle(15, 100);
 
         knee_[0].init(this, "left_front_knee", 0, 0.0, 270.0);
         knee_[1].init(this, "left_back_knee", 2, 0.0, 270.0);
@@ -45,7 +56,8 @@ public:
         }
 
         using namespace std::chrono_literals;
-        timer_ = this->create_wall_timer(2ms, std::bind(&DogBot::update, this));
+        timer_    = this->create_wall_timer(2ms, std::bind(&DogBot::update, this));
+        timer_imu = this->create_wall_timer(4ms, std::bind(&DogBot::imu_update, this));
 
         RCLCPP_INFO(
             this->get_logger(), "DogBot ready, 8 servos on %s", serial_.getDevice().c_str());
@@ -54,6 +66,7 @@ public:
 private:
     void update() {
         command_update();
+        thrower_update();
         gamepad_.update();
     }
 
@@ -81,11 +94,32 @@ private:
         }
     }
 
+    void thrower_update() {
+        thrower_left_.update();
+        thrower_right_.update();
+    }
+
+    void imu_update() {
+        try {
+            imu_.update();
+            RCLCPP_INFO(
+                get_logger(), "pitch = %lf\t yaw = %lf\t roll = %lf\n", imu_.get_pitch(),
+                imu_.get_yaw(), imu_.get_roll());
+        } catch (const std::exception& e) {
+            RCLCPP_ERROR_THROTTLE(
+                this->get_logger(), *this->get_clock(), 1000, "IMU update failed: %s", e.what());
+        }
+    }
+
     SerialPort serial_;
     device::Gamepad gamepad_;
+    device::IMU660RB imu_;
+    device::TD_8120MG thrower_left_;
+    device::TD_8120MG thrower_right_;
     dogbot_core::hardware::device::ZX30S knee_[4];
     dogbot_core::hardware::device::ZX30S hip_[4];
     rclcpp::TimerBase::SharedPtr timer_;
+    rclcpp::TimerBase::SharedPtr timer_imu;
 };
 } // namespace dogbot_core::hardware
 
