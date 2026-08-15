@@ -16,11 +16,19 @@ rtsp_stream_node:
 following_node:
   ros__parameters:
     threshold: 120
+    threshold_mode: "fixed"
+    threshold_channel: "value"
+    width_continuity_weight: 0.1
     gaussian_kernel_size: 5
+    morph_kernel_size: 3
     roi_bottom_ratio: 0.6
-    max_trace_steps: 2000
-    vx_max: 0.2
-    kp_angular: 5.0
+    max_gap_rows: 5
+    center_smooth_window: 9
+    lookahead_ratio: 0.7
+    lookahead_band_ratio: 0.12
+    ema_alpha: 0.25
+    vx_max: 0.4
+    kp_angular: 10.0
 
 color_detect_node:
   ros__parameters:

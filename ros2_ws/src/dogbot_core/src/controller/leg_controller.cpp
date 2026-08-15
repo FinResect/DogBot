@@ -47,6 +47,14 @@ public:
             "/vision/following/theta", 10,
             [this](const std_msgs::msg::Float64::SharedPtr msg) { theta_ = msg->data; });
 
+        vision_timeout_ = this->declare_parameter("vision_timeout", 0.5);
+        vision_cmd_sub_ = create_subscription<geometry_msgs::msg::Twist>(
+            "/vision/following/controller", 10,
+            [this](const geometry_msgs::msg::Twist::SharedPtr msg) {
+                vision_twist_     = *msg;
+                last_vision_time_ = this->now();
+            });
+
         // 动态抬腿高度参数（上坡/下坡时按 IMU pitch 调整摆动腿抬脚高度）：
         //  - pitch_lift_gain：加高增益 (m/rad)，每 1 弧度 pitch 增加多少抬脚高度；
         //    例 10° 坡 ≈ 0.175 rad × 0.2 ≈ +35mm
@@ -58,7 +66,7 @@ public:
         //    实机若发现该加高的腿反了则置 -1
         //  - stride_reduce_gain：高度↑ 步幅↓ 折算系数，
         //    stride_scale = clamp(1 − gain·ΔH/kDefaultStepHeight, 0.5, 1.0)
-        pitch_lift_gain_ = this->declare_parameter("pitch_lift_gain", 0.8);
+        pitch_lift_gain_ = this->declare_parameter("pitch_lift_gain", 0.0);
         max_extra_lift_  = this->declare_parameter("max_extra_lift", 0.02);
         pitch_deadband_ =
             this->declare_parameter("pitch_deadband_deg", 2.0) * std::numbers::pi / 180.0;
@@ -101,6 +109,7 @@ private:
         auto button_right   = gamepad_state_.dpad.right;
         auto button_start   = gamepad_state_.buttons.start;
         auto button_mode    = gamepad_state_.buttons.mode;
+        auto button_l1      = gamepad_state_.shoulders.l1;
         auto joystick_left  = gamepad_state_.sticks.joystick_left;
         auto joystick_right = gamepad_state_.sticks.joystick_right;
 
@@ -142,13 +151,23 @@ private:
         } else if (button_up && !last_button_up) {
             gait_.set_gait_type(GaitType::Climb);
             controller_mode_ = dogbot_msg::ControllerMode::Auto;
+        } else if (button_l1 && !last_button_l1) {
+            gait_.set_gait_type(GaitType::TrotSpinMix);
+            controller_mode_ = dogbot_msg::ControllerMode::Vision;
         }
 
         switch (controller_mode_) {
         case dogbot_msg::ControllerMode::Auto: solver_update(feet_update(-0.2, -5.0)); break;
         case dogbot_msg::ControllerMode::Manual:
-            solver_update(feet_update(-0.5 * joystick_left.y, 5.0 * joystick_right.x));
+            solver_update(feet_update(-0.4 * joystick_left.y, 10.0 * joystick_right.x));
             break;
+        case dogbot_msg::ControllerMode::Vision: {
+            bool stale   = (this->now() - last_vision_time_).seconds() > vision_timeout_;
+            double vx    = stale ? 0.0 : -vision_twist_.linear.x;
+            double omega = stale ? 0.0 : vision_twist_.angular.z;
+            solver_update(feet_update(vx, omega));
+            break;
+        }
         default: reset_all_controller(); break;
         }
 
@@ -161,6 +180,7 @@ private:
         last_button_right = button_right;
         last_button_start = button_start;
         last_button_mode  = button_mode;
+        last_button_l1    = button_l1;
     }
 
     void reset_all_controller() {
@@ -246,22 +266,28 @@ private:
     std::unique_ptr<LegSolver> solver_;
     dogbot_msg::ControllerMode controller_mode_{dogbot_msg::ControllerMode::None};
 
-    uint8_t last_button_x;
-    uint8_t last_button_y;
-    uint8_t last_button_a;
-    uint8_t last_button_b;
-    uint8_t last_button_up;
-    uint8_t last_button_left;
-    uint8_t last_button_right;
-    uint8_t last_button_start;
-    uint8_t last_button_mode;
+    uint8_t last_button_x     = 0;
+    uint8_t last_button_y     = 0;
+    uint8_t last_button_a     = 0;
+    uint8_t last_button_b     = 0;
+    uint8_t last_button_up    = 0;
+    uint8_t last_button_left  = 0;
+    uint8_t last_button_right = 0;
+    uint8_t last_button_start = 0;
+    uint8_t last_button_mode  = 0;
+    uint8_t last_button_l1    = 0;
 
     double theta_               = 0.0;
     static constexpr double dt_ = 0.002;
 
+    geometry_msgs::msg::Twist vision_twist_;
+    rclcpp::Time last_vision_time_{0, 0, RCL_ROS_TIME};
+    double vision_timeout_ = 0.5;
+
     rclcpp::Subscription<dogbot_msg::msg::GamepadState>::SharedPtr gamepad_state_sub_;
     rclcpp::Subscription<std_msgs::msg::Float64>::SharedPtr theta_sub_;
     rclcpp::Subscription<std_msgs::msg::Float64>::SharedPtr imu_pitch_sub_;
+    rclcpp::Subscription<geometry_msgs::msg::Twist>::SharedPtr vision_cmd_sub_;
     rclcpp::Publisher<std_msgs::msg::Float64>::SharedPtr pub_hip_[4];
     rclcpp::Publisher<std_msgs::msg::Float64>::SharedPtr pub_knee_[4];
     rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr pub_thrower_left_;

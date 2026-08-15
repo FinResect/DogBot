@@ -83,7 +83,7 @@ public:
 
 private:
     static constexpr double kStanceZ = 0.14; // 站立时足端离髋竖直距离 (m)
-    static constexpr double kPeriod  = 1.8;  // 步态周期 (s)
+    static constexpr double kPeriod  = 0.8;  // 步态周期 (s)
     // 足端最大速度 (m/s)：由舵机最大转速 187.5°/s (0.32s/60°) 反推——
     // 髋到足距离取保守值 r=0.114，留 ~14% 余量。支撑相足端速度 = 指令速度，
     // 因此指令在速度层钳制；摆动相目标幅值另行由 kMaxStride 限制。

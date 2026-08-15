@@ -28,7 +28,7 @@ public:
 
         thrower_left_.init(this, "/thrower/left", 18);
         thrower_right_.init(this, "/thrower/right", 12);
-        thrower_left_.set_angle(15, 100);
+        thrower_left_.set_angle(15, 110);
         thrower_right_.set_angle(155, 80);
 
         knee_[0].init(this, "left_front_knee", 4, 0.0, 270.0);
