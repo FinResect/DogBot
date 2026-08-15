@@ -3,6 +3,7 @@
 #include "controller_mode.hpp"
 
 #include <Eigen/Dense>
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstdint>
@@ -46,6 +47,30 @@ public:
             "/vision/following/theta", 10,
             [this](const std_msgs::msg::Float64::SharedPtr msg) { theta_ = msg->data; });
 
+        // 动态抬腿高度参数（上坡/下坡时按 IMU pitch 调整摆动腿抬脚高度）：
+        //  - pitch_lift_gain：加高增益 (m/rad)，每 1 弧度 pitch 增加多少抬脚高度；
+        //    例 10° 坡 ≈ 0.175 rad × 0.2 ≈ +35mm
+        //  - max_extra_lift：单腿加高上限 (m)，防止大坡度抬脚过高超出舵机速度能力
+        //  - pitch_deadband_deg：死区（度），低于此角度的 pitch 视为平地不加高，
+        //    滤除行走振动与平地微小倾斜
+        //  - pitch_ema_alpha：IMU pitch 低通系数 (0~1)，越大响应越快越抖、越小越平滑越滞后
+        //  - pitch_sign：符号修正（±1），pitch 正负对应上坡/下坡依赖 IMU 安装方向，
+        //    实机若发现该加高的腿反了则置 -1
+        //  - stride_reduce_gain：高度↑ 步幅↓ 折算系数，
+        //    stride_scale = clamp(1 − gain·ΔH/kDefaultStepHeight, 0.5, 1.0)
+        pitch_lift_gain_ = this->declare_parameter("pitch_lift_gain", 0.8);
+        max_extra_lift_  = this->declare_parameter("max_extra_lift", 0.02);
+        pitch_deadband_ =
+            this->declare_parameter("pitch_deadband_deg", 2.0) * std::numbers::pi / 180.0;
+        pitch_ema_alpha_    = this->declare_parameter("pitch_ema_alpha", 0.2);
+        pitch_sign_         = this->declare_parameter("pitch_sign", -1.0);
+        stride_reduce_gain_ = this->declare_parameter("stride_reduce_gain", 0.5);
+
+        imu_pitch_sub_ = create_subscription<std_msgs::msg::Float64>(
+            "/imu/pitch", 10, [this](const std_msgs::msg::Float64::SharedPtr msg) {
+                pitch_filt_ = pitch_ema_alpha_ * msg->data + (1.0 - pitch_ema_alpha_) * pitch_filt_;
+            });
+
         pub_thrower_left_  = create_publisher<std_msgs::msg::Bool>("/thrower/left/enable", 10);
         pub_thrower_right_ = create_publisher<std_msgs::msg::Bool>("/thrower/right/enable", 10);
 
@@ -65,15 +90,6 @@ public:
 private:
     void update() {
 
-        std_msgs::msg::Bool left_msg;
-        std_msgs::msg::Bool right_msg;
-
-        left_msg.data  = false;
-        right_msg.data = false;
-
-        pub_thrower_left_->publish(left_msg);
-        pub_thrower_right_->publish(right_msg);
-
         using namespace dogbot_msg::msg;
 
         auto button_x       = gamepad_state_.buttons.x;
@@ -81,10 +97,15 @@ private:
         auto button_a       = gamepad_state_.buttons.a;
         auto button_b       = gamepad_state_.buttons.b;
         auto button_up      = gamepad_state_.dpad.up;
+        auto button_left    = gamepad_state_.dpad.left;
+        auto button_right   = gamepad_state_.dpad.right;
         auto button_start   = gamepad_state_.buttons.start;
         auto button_mode    = gamepad_state_.buttons.mode;
         auto joystick_left  = gamepad_state_.sticks.joystick_left;
         auto joystick_right = gamepad_state_.sticks.joystick_right;
+
+        static std_msgs::msg::Bool left_msg;
+        static std_msgs::msg::Bool right_msg;
 
         if (gamepad_state_.status == GamepadState::UNKNOWN
             || gamepad_state_.status == GamepadState::DISCONNECTED
@@ -93,6 +114,15 @@ private:
             controller_mode_ = dogbot_msg::ControllerMode::None;
             return;
         }
+
+        if (button_left && !last_button_left) {
+            left_msg.data = !left_msg.data;
+        } else if (button_right && !last_button_right) {
+            right_msg.data = !right_msg.data;
+        }
+
+        pub_thrower_left_->publish(left_msg);
+        pub_thrower_right_->publish(right_msg);
 
         if (button_start && !last_button_start) {
             gait_.set_gait_type(GaitType::Stand);
@@ -115,9 +145,9 @@ private:
         }
 
         switch (controller_mode_) {
-        case dogbot_msg::ControllerMode::Auto: solver_update(feet_update(0.2, 2.0)); break;
+        case dogbot_msg::ControllerMode::Auto: solver_update(feet_update(-0.2, -5.0)); break;
         case dogbot_msg::ControllerMode::Manual:
-            solver_update(feet_update(0.2 * joystick_left.y, -5.0 * joystick_right.x));
+            solver_update(feet_update(-0.5 * joystick_left.y, 5.0 * joystick_right.x));
             break;
         default: reset_all_controller(); break;
         }
@@ -127,6 +157,8 @@ private:
         last_button_x     = button_x;
         last_button_y     = button_y;
         last_button_up    = button_up;
+        last_button_left  = button_left;
+        last_button_right = button_right;
         last_button_start = button_start;
         last_button_mode  = button_mode;
     }
@@ -147,6 +179,32 @@ private:
 
     std::array<Eigen::Vector3d, 4> feet_update(double vx, double omega) {
 
+        // IMU pitch → 逐腿摆动抬脚高度 + 步幅缩放：
+        // 上坡（抬头，pitch_sign 修正后为正）重心靠后，后腿 (LB=1, RB=2) 抬脚被
+        // 压缩，加高 ΔH；下坡（低头）前腿 (LF=0, RF=3) 加高。ΔH 死区 + 限幅。
+        // 高度↑ 步幅↓：摆动相峰值速度 = 2*stride/T_swing（水平）+ π*H/T_swing
+        // （竖直），抬脚加高后按比例收窄步幅上限，保住舵机速度余量。
+        const double pitched = pitch_sign_ * pitch_filt_;
+        double extra         = 0.0;
+        if (std::abs(pitched) > pitch_deadband_) {
+            extra = std::clamp(pitch_lift_gain_ * std::abs(pitched), 0.0, max_extra_lift_);
+        }
+
+        std::array<double, 4> lift;
+        lift.fill(Gait::kDefaultStepHeight);
+        if (extra > 0.0) {
+            if (pitched > 0.0) {
+                lift[1] += extra;
+                lift[2] += extra;
+            } else {
+                lift[0] += extra;
+                lift[3] += extra;
+            }
+        }
+        const double stride_scale =
+            std::clamp(1.0 - stride_reduce_gain_ * (extra / Gait::kDefaultStepHeight), 0.5, 1.0);
+
+        gait_.set_swing_profile(lift, stride_scale);
         gait_.set_gait_param(vx, omega);
         return gait_.update(dt_);
     }
@@ -159,9 +217,24 @@ private:
             std_msgs::msg::Float64 knee_msg;
             hip_msg.data  = angles.hip * 180.0 / std::numbers::pi;
             knee_msg.data = angles.knee * 180.0 / std::numbers::pi;
-            if (!i) {
-                hip_msg.data += 5.0;
-            }
+            // switch (i) {
+            // case 0:
+            //     hip_msg.data += 5.0;
+            //     knee_msg.data += 0.0;
+            //     break;
+            // case 1:
+            //     hip_msg.data += -10.0 + 1.0;
+            //     knee_msg.data += 0.0 - 30.0 + 5.0 + 5.0;
+            //     break;
+            // case 2:
+            //     hip_msg.data += 0.0 + 1.0;
+            //     knee_msg.data += -25.0 - 8.0 + 5.0 + 5.0;
+            //     break;
+            // case 3:
+            //     hip_msg.data += 0.0;
+            //     knee_msg.data += -35.0;
+            //     break;
+            // }
 
             pub_hip_[i]->publish(hip_msg);
             pub_knee_[i]->publish(knee_msg);
@@ -178,6 +251,8 @@ private:
     uint8_t last_button_a;
     uint8_t last_button_b;
     uint8_t last_button_up;
+    uint8_t last_button_left;
+    uint8_t last_button_right;
     uint8_t last_button_start;
     uint8_t last_button_mode;
 
@@ -186,11 +261,20 @@ private:
 
     rclcpp::Subscription<dogbot_msg::msg::GamepadState>::SharedPtr gamepad_state_sub_;
     rclcpp::Subscription<std_msgs::msg::Float64>::SharedPtr theta_sub_;
+    rclcpp::Subscription<std_msgs::msg::Float64>::SharedPtr imu_pitch_sub_;
     rclcpp::Publisher<std_msgs::msg::Float64>::SharedPtr pub_hip_[4];
     rclcpp::Publisher<std_msgs::msg::Float64>::SharedPtr pub_knee_[4];
     rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr pub_thrower_left_;
     rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr pub_thrower_right_;
     rclcpp::TimerBase::SharedPtr timer_;
+
+    double pitch_filt_         = 0.0;  // IMU pitch 低通后（弧度）
+    double pitch_lift_gain_    = 0.1;  // ΔH 增益（m/rad）
+    double max_extra_lift_     = 0.02; // 抬脚加高上限 (m)
+    double pitch_deadband_     = 0.0;  // 死区（弧度）
+    double pitch_ema_alpha_    = 0.2;  // EMA 系数
+    double pitch_sign_         = 1.0;  // pitch 符号修正（实机方向反时置 -1）
+    double stride_reduce_gain_ = 0.5;  // 高度↑ 步幅↓ 折算系数
 };
 
 } // namespace dogbot_core::controller

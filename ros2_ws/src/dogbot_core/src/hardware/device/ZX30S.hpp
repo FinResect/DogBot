@@ -37,14 +37,16 @@ public:
 
     double clampAngle(double angle) const { return std::clamp(angle, angle_min_, angle_max_); }
 
-    uint16_t clampPWM(uint16_t pwm) const {
+    uint16_t clampPWM(int pwm) const {
         return static_cast<uint16_t>(std::clamp<int>(pwm, eff_min_, eff_max_));
     }
 
     uint16_t angleToPWM(double angle) const {
         double clamped = clampAngle(angle);
-        return clampPWM(static_cast<uint16_t>(
-            clamped / angle_max_deg_ * 2000.0 + static_cast<double>(zero_pwm_)));
+        int pwm =
+            static_cast<int>(clamped / angle_max_deg_ * 2000.0 + static_cast<double>(zero_pwm_));
+        pwm += pwm_offset_;
+        return clampPWM(pwm);
     }
 
     std::string generateCommand(uint16_t pwm, uint16_t time_ms = 0) const {
@@ -62,6 +64,8 @@ public:
     uint16_t getTargetPWM() const { return angleToPWM(control_angle_); }
 
     int getServoId() const { return servo_id_; }
+
+    void setPWMOffset(int16_t offset) { pwm_offset_ = offset; }
 
     void setPWMLimits(uint16_t min_pwm, uint16_t max_pwm) {
         const int eff_min = std::max<int>(kPwmMin, min_pwm);
@@ -86,8 +90,9 @@ public:
     uint16_t getZeroPWM() const { return zero_pwm_; }
 
     double pwmToAngle(uint16_t pwm) const {
-        return (static_cast<double>(pwm) - static_cast<double>(zero_pwm_)) / 2000.0
-             * angle_max_deg_;
+        return (static_cast<double>(pwm) - static_cast<double>(pwm_offset_)
+                - static_cast<double>(zero_pwm_))
+             / 2000.0 * angle_max_deg_;
     }
 
     void publishAngle(double angle) {
@@ -204,6 +209,7 @@ private:
     double angle_max_     = 270.0;
     double angle_max_deg_ = 270.0;
     double control_angle_ = 0.0;
+    int16_t pwm_offset_   = 0;
     uint16_t zero_pwm_    = kPwmMin;
     uint16_t eff_min_     = kPwmMin;
     uint16_t eff_max_     = kPwmMax;

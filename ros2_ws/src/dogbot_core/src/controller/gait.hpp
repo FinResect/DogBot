@@ -68,17 +68,30 @@ public:
         return feet_;
     }
 
+    // 摆动相基准抬脚高度 (m)：上坡/下坡时重心偏移会压缩部分腿的抬脚能力，
+    // 由调用方（leg_controller）按 IMU pitch 通过 set_swing_profile() 动态调整；
+    // 本常量作为基准与 soft_reset 复位值。
+    static constexpr double kDefaultStepHeight = 0.03;
+
+    // 注入摆动轨迹参数：逐腿抬脚高度（m）与步幅缩放系数（0..1，高度↑ 步幅↓）。
+    // 步幅缩放同时作用于摆动目标与支撑相积分（乘在各自 max_stride 上），保持
+    // 摆动相峰值速度不超出舵机跟踪能力。stand / climb 忽略。
+    void set_swing_profile(const std::array<double, 4>& lift_heights, double stride_scale) {
+        step_height_  = lift_heights;
+        stride_scale_ = std::clamp(stride_scale, 0.0, 1.0);
+    }
+
 private:
-    static constexpr double kStanceZ    = 0.16; // 站立时足端离髋竖直距离 (m)
-    static constexpr double kStepHeight = 0.08; // 摆动相抬脚高度 (m)
-    static constexpr double kPeriod     = 0.6;  // 步态周期 (s)
+    static constexpr double kStanceZ = 0.14; // 站立时足端离髋竖直距离 (m)
+    static constexpr double kPeriod  = 1.8;  // 步态周期 (s)
     // 足端最大速度 (m/s)：由舵机最大转速 187.5°/s (0.32s/60°) 反推——
     // 髋到足距离取保守值 r=0.114，留 ~14% 余量。支撑相足端速度 = 指令速度，
     // 因此指令在速度层钳制；摆动相目标幅值另行由 kMaxStride 限制。
     static constexpr double kMaxFootSpeed = 0.32;
-    // 单腿行程上限 (m)：摆动相足端峰值速度 = pi*stride/T_swing，由 kMaxFootSpeed
-    // 推导得 stride<=0.032。摆动目标与支撑相积分共用该限幅，避免两者不对称导致
-    // 摆动幅度放大、速度再次超限。
+    // 单腿行程上限 (m)：复合摆线摆动相峰值速度 = 2*stride/T_swing（u=0.5 处
+    // 斜率最大为 2），由 kMaxFootSpeed 推导得 stride<=0.048，取 0.032 保守限幅。
+    // 摆动目标与支撑相积分共用该限幅，避免两者不对称导致摆动幅度放大、
+    // 速度再次超限。
     static constexpr double kMaxStride  = 0.032;
     static constexpr double kSwingRatio = 0.5; // 摆动相占周期比例
     static constexpr double kStrideTime = kPeriod * 0.25;
@@ -96,8 +109,8 @@ private:
     static constexpr double kWalkPeriod = 1.0;
     static constexpr double kWalkSwingRatio = 0.25; // 摆动相占周期比例（与相位差一致）
     static constexpr double kWalkStrideTime = kWalkPeriod * (1.0 - kWalkSwingRatio) * 0.5;
-    // 摆动相峰值速度 = pi*stride/T_swing，由 kMaxFootSpeed 反推步幅上限 ≈ 0.0255
-    // （同 kMaxStride 推导）。
+    // 摆动相峰值速度 = 2*stride/T_swing（复合摆线），由 kMaxFootSpeed 反推步幅
+    // 上限 ≈ 0.04；沿用旧值 0.0255 保守限幅（同 kMaxStride）。
     static constexpr double kWalkMaxStride =
         kMaxFootSpeed * (kWalkPeriod * kWalkSwingRatio) / std::numbers::pi;
 
@@ -114,18 +127,21 @@ private:
     // 支撑相足端速度 = vx 项 + omega 项（速度层叠加，由 use_vx/use_omega 决定是否
     // 启用，trot 只开 vx、spin 只开 omega、trot_spin_mix 双开），速度级钳制到
     // kMaxFootSpeed，防止支撑相滑动速度超出舵机跟踪能力。stride_time/max_stride 为
-    // 单腿行程及其限幅（摆动相峰值速度 = pi*stride/T_swing，由 kMaxFootSpeed 反推），
-    // 摆动目标与支撑相积分共用该限幅，避免两者不对称导致摆动幅度放大、速度再次超限。
+    // 单腿行程及其限幅（复合摆线摆动相峰值速度 = 2*stride/T_swing，由 kMaxFootSpeed
+    // 反推），摆动目标与支撑相积分共用该限幅，避免两者不对称导致摆动幅度放大、
+    // 速度再次超限。
     void step_cycle(
         double dt, double period, const std::array<double, 4>& phase, double swing_ratio,
         double stride_time, double max_stride, bool use_vx, bool use_omega) {
         t_ += dt;
+        // 步幅有效上限：max_stride × 调用方缩放（抬脚加高时按比例收窄，保速度余量）
+        const double stride_lim = max_stride * stride_scale_;
 
         for (int i = 0; i < 4; ++i) {
             const double v_i = std::clamp(
                 (use_vx ? vx_ : 0.0) - (use_omega ? omega_ : 0.0) * kBodyY[i], -kMaxFootSpeed,
                 kMaxFootSpeed);
-            const double stride = std::clamp(v_i * stride_time, -max_stride, max_stride);
+            const double stride = std::clamp(v_i * stride_time, -stride_lim, stride_lim);
 
             double s = std::fmod(t_ / period + phase[i], 1.0);
             if (s < 0.0) {
@@ -144,17 +160,20 @@ private:
                     y_start_[i]       = y_[i];
                     swing_entered_[i] = true;
                 }
-                const double u       = s / swing_ratio;
-                const double profile = 0.5 * (1.0 - std::cos(std::numbers::pi * u));
-                // 双余弦抬脚弧：两端高度与斜率均为 0，摆动/支撑切换处无跳变
-                // （单余弦 arc 在离散相位结束时残留 ~0.6mm 台阶）。
+                const double u = s / swing_ratio;
+                // 复合摆线水平分量：u - sin(2πu)/2π，两端速度与加速度均为 0，
+                // 起脚/落足无冲击，摆动/支撑切换处无跳变。
+                const double profile =
+                    u - std::sin(2.0 * std::numbers::pi * u) / (2.0 * std::numbers::pi);
+                // 复合摆线竖直分量（抬脚弧）：两端高度与斜率均为 0，峰值高度
+                // kDefaultStepHeight 出现在 u=0.5。
                 const double lift = 0.5 * (1.0 - std::cos(2.0 * std::numbers::pi * u));
                 y_[i]             = y_start_[i] + (stride - y_start_[i]) * profile;
-                feet_[i]          = Eigen::Vector3d(0.0, y_[i], kStanceZ - kStepHeight * lift);
+                feet_[i]          = Eigen::Vector3d(0.0, y_[i], kStanceZ - step_height_[i] * lift);
             } else {
                 // 支撑相：足端相对机体按指令速度积分（后退），抬脚高度回落到站立位。
                 swing_entered_[i] = false;
-                y_[i]             = std::clamp(y_[i] - v_i * dt, -max_stride, max_stride);
+                y_[i]             = std::clamp(y_[i] - v_i * dt, -stride_lim, stride_lim);
                 feet_[i]          = Eigen::Vector3d(0.0, y_[i], kStanceZ);
             }
         }
@@ -237,10 +256,16 @@ private:
             if (i == climber) {
                 const double y_from = foothold_[i].y();
                 const double z_from = foothold_[i].z();
-                // 沿弧线从当前落点摆到 (kClimbReach, zNext)，抬脚弧高 kClimbStepHeight。
-                const double y = y_from + (kClimbReach - y_from) * sp;
-                const double z = z_from + (z_next() - z_from) * sp
-                               - kClimbStepHeight * std::sin(std::numbers::pi * sp);
+                // 沿复合摆线弧线从当前落点摆到 (kClimbReach, zNext)：
+                // y 用摆线水平分量（端点速度 0），z 用净爬升线性叠加摆线竖直
+                // 分量（弧高 kClimbStepHeight，端点斜率 0），阶段切换处平滑。
+                const double y =
+                    y_from
+                    + (kClimbReach - y_from)
+                          * (sp - std::sin(2.0 * std::numbers::pi * sp) / (2.0 * std::numbers::pi));
+                const double z =
+                    z_from + (z_next() - z_from) * sp
+                    - kClimbStepHeight * 0.5 * (1.0 - std::cos(2.0 * std::numbers::pi * sp));
                 feet_[i] = Eigen::Vector3d(0.0, y, z);
                 if (p >= kClimbSwingRatio) {
                     foothold_[i] = Eigen::Vector3d(0.0, kClimbReach, z_next());
@@ -281,6 +306,8 @@ private:
         y_.fill(0.0);
         y_start_.fill(0.0);
         swing_entered_.fill(false);
+        step_height_.fill(kDefaultStepHeight);
+        stride_scale_  = 1.0;
         climb_step_    = 0;
         climb_phase_   = 0;
         phase_elapsed_ = 0.0;
@@ -297,9 +324,13 @@ private:
 
     double t_ = 0.0;
 
-    std::array<double, 4> y_{};                 // 足端沿 y 轴相对站立位的偏移
-    std::array<double, 4> y_start_{};           // 摆动相起始偏移
+    std::array<double, 4> y_{};       // 足端沿 y 轴相对站立位的偏移
+    std::array<double, 4> y_start_{}; // 摆动相起始偏移
     std::array<bool, 4> swing_entered_{};
+    // 逐腿摆动抬脚高度 (m)，默认 kDefaultStepHeight，按 IMU 姿态动态调整
+    std::array<double, 4> step_height_{
+        kDefaultStepHeight, kDefaultStepHeight, kDefaultStepHeight, kDefaultStepHeight};
+    double stride_scale_ = 1.0;                 // 步幅缩放（0..1），与抬脚高度联动
 
     int climb_step_       = 0;                  // 已完成台阶数
     int climb_phase_      = 0;                  // 当前阶段 0..5

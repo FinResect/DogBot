@@ -2,7 +2,7 @@
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
-<title>DogBot 步态可视化（walk / trot 足端轨迹）</title>
+<title>DogBot 步态可视化（walk / trot / spin 足端轨迹）</title>
 <style>
   :root { --bg:#101418; --panel:#171c22; --fg:#d8dee4; --dim:#6b7680; --accent:#4d9fff; }
   * { box-sizing: border-box; }
@@ -28,18 +28,30 @@
 </style>
 </head>
 <body>
-<h1>DogBot 步态可视化 — 足端轨迹（复刻 gait.hpp 的 step_cycle）</h1>
+<h1>DogBot 步态可视化 — 足端轨迹（复刻 gait.hpp 的 step_cycle：水平=心形线 profile（时间轴复合摆线平滑），竖直=复合摆线 lift）</h1>
 
 <div class="controls">
   <div class="ctl">
     <label>步态</label>
     <button id="btnWalk" class="active">Walk</button>
     <button id="btnTrot">Trot</button>
+    <button id="btnSpin">Spin</button>
+    <button id="btnTrotSpinMix">Trot+Spin</button>
   </div>
   <div class="ctl">
     <label>vx</label>
     <input type="range" id="vxSlider" min="0" max="0.32" step="0.001" value="0.2">
     <b id="vxVal">0.200</b><span class="info">m/s</span>
+  </div>
+  <div class="ctl">
+    <label>ω</label>
+    <input type="range" id="omegaSlider" min="-2" max="2" step="0.05" value="0.6">
+    <b id="omegaVal">0.60</b><span class="info">rad/s</span>
+  </div>
+  <div class="ctl">
+    <label>抬脚高 h</label>
+    <input type="range" id="hSlider" min="0.01" max="0.05" step="0.001" value="0.03">
+    <b id="hVal">0.030</b><span class="info">m</span>
   </div>
   <div class="ctl">
     <label>速度倍率</label>
@@ -69,7 +81,7 @@
 <div class="canvas-row">
   <div>
     <canvas id="cvSignals" width="1292" height="240"></canvas>
-    <div class="legend" style="justify-content:center;">LF 腿 y(t)（上，±0.05）与 z(t)（下，0.07~0.13），时间轴 1.2s</div>
+    <div class="legend" style="justify-content:center;">LF 腿 y(t)（上，±0.05）与 z(t)（下，0.11~0.14），时间轴 = 当前步态周期</div>
   </div>
 </div>
 
@@ -77,22 +89,39 @@
 'use strict';
 // ============ 常量（与 gait.hpp 一致） ============
 const G = {
-  kStanceZ: 0.08,
-  kStepHeight: 0.04,
+  kStanceZ: 0.14,
+  kStepHeight: 0.03,
   kMaxFootSpeed: 0.32,
   kneeLimitDeg: 187.5,
+  kBodyY: [0.05, 0.05, -0.05, -0.05],   // 各腿肩点横向杠杆臂（LF/LB +，RB/RF -）
   gait: {
     walk: {
       T: 1.0, swingRatio: 0.25,
       strideTime: 1.0 * (1 - 0.25) * 0.5,
       maxStride: 0.32 * (1.0 * 0.25) / Math.PI,
       phase: [0.0, 0.5, 0.25, 0.75],
+      useVx: true, useOmega: false,
     },
     trot: {
-      T: 0.6, swingRatio: 0.5,
-      strideTime: 0.6 * 0.25,
+      T: 1.8, swingRatio: 0.5,
+      strideTime: 1.8 * 0.25,
       maxStride: 0.032,
       phase: [0.0, 0.5, 0.0, 0.5],
+      useVx: true, useOmega: false,
+    },
+    spin: {
+      T: 1.8, swingRatio: 0.5,
+      strideTime: 1.8 * 0.25,
+      maxStride: 0.032,
+      phase: [0.0, 0.5, 0.0, 0.5],
+      useVx: false, useOmega: true,
+    },
+    trotSpinMix: {
+      T: 1.8, swingRatio: 0.5,
+      strideTime: 1.8 * 0.25,
+      maxStride: 0.032,
+      phase: [0.0, 0.5, 0.0, 0.5],
+      useVx: true, useOmega: true,
     },
   },
   bodyX: [0.09, -0.09, -0.09, 0.09],   // LF, LB, RB, RF 肩点纵向位置（示意值）
@@ -104,6 +133,7 @@ const G = {
 const sim = {
   gait: 'walk',
   vx: 0.2,
+  omega: 0.6,
   t: 0.0,
   y: [0, 0, 0, 0],
   yStart: [0, 0, 0, 0],
@@ -135,13 +165,30 @@ function softReset() {
   sim.kneeSweepRate = 0.0;
 }
 
+// ============ 摆动轨迹（与 gait.hpp step_cycle 一致） ============
+// 水平：逆时针旋转 90° 的心形线 r=a(1+sinθ) 水平分量经复合摆线时间轴平滑——
+// profile = 0.5*(1-(1+sinθ)cosθ)：0→1，起脚后撤、落地前过冲再拉回。
+// 竖直：复合摆线 lift = 0.5*(1-cos(2πu))，弧顶宽广，给舵机留足物理响应时间。
+function cardioidArc(u, yStart, stride, h) {
+  const smoothed = u - Math.sin(2.0 * Math.PI * u) / (2.0 * Math.PI);
+  const theta = Math.PI * smoothed;
+  const s = Math.sin(theta), c = Math.cos(theta);
+  const profile = 0.5 * (1.0 - (1.0 + s) * c);
+  const lift = 0.5 * (1.0 - Math.cos(2.0 * Math.PI * u));
+  const y = yStart + (stride - yStart) * profile;
+  const z = G.kStanceZ - h * lift;
+  return [y, z];
+}
+
 // ============ step_cycle 端口（500Hz，dt=0.002） ============
 function stepCycle(dt) {
   const p = G.gait[sim.gait];
   sim.t += dt;
 
   for (let i = 0; i < 4; i++) {
-    const v = Math.min(Math.max(sim.vx, -G.kMaxFootSpeed), G.kMaxFootSpeed);
+    const v = Math.min(Math.max(
+      (p.useVx ? sim.vx : 0) - (p.useOmega ? sim.omega : 0) * G.kBodyY[i],
+      -G.kMaxFootSpeed), G.kMaxFootSpeed);
     const stride = Math.min(Math.max(v * p.strideTime, -p.maxStride), p.maxStride);
 
     let s = (sim.t / p.T + p.phase[i]) % 1.0;
@@ -155,10 +202,10 @@ function stepCycle(dt) {
     } else if (s < p.swingRatio) {
       if (!sim.entered[i]) { sim.yStart[i] = sim.y[i]; sim.entered[i] = true; }
       const u = s / p.swingRatio;
-      const profile = 0.5 * (1 - Math.cos(Math.PI * u));
-      const lift = 0.5 * (1 - Math.cos(2 * Math.PI * u));
-      sim.y[i] = sim.yStart[i] + (stride - sim.yStart[i]) * profile;
-      y = sim.y[i]; z = G.kStanceZ + G.kStepHeight * lift;
+      // 摆动相 = 心形线水平 profile + 复合摆线竖直 lift
+      const res = cardioidArc(u, sim.yStart[i], stride, G.kStepHeight);
+      y = res[0]; z = res[1];
+      sim.y[i] = y;
     } else {
       sim.entered[i] = false;
       sim.y[i] = Math.min(Math.max(sim.y[i] - v * dt, -p.maxStride), p.maxStride);
@@ -235,8 +282,8 @@ function drawSide() {
   ctx.fillRect(0, 0, cv.width, cv.height);
 
   // 地面线（站立位 z=kStanceZ）
-  let [gx0, gy] = worldToScreen(cv, -0.125, -G.kStanceZ, -0.125, 0.125, -0.135, 0.03);
-  let [gx1] = worldToScreen(cv, 0.125, -G.kStanceZ, -0.125, 0.125, -0.135, 0.03);
+  let [gx0, gy] = worldToScreen(cv, -0.125, -G.kStanceZ, -0.15, 0.15, -0.155, 0.03);
+  let [gx1] = worldToScreen(cv, 0.125, -G.kStanceZ, -0.15, 0.15, -0.155, 0.03);
   ctx.strokeStyle = '#2b3642';
   ctx.lineWidth = 1;
   ctx.setLineDash([4, 4]);
@@ -244,8 +291,8 @@ function drawSide() {
   ctx.setLineDash([]);
 
   // 机体
-  let [bx0, by] = worldToScreen(cv, -0.1, 0, -0.125, 0.125, -0.135, 0.03);
-  let [bx1] = worldToScreen(cv, 0.1, 0, -0.125, 0.125, -0.135, 0.03);
+  let [bx0, by] = worldToScreen(cv, -0.1, 0, -0.15, 0.15, -0.155, 0.03);
+  let [bx1] = worldToScreen(cv, 0.1, 0, -0.15, 0.15, -0.155, 0.03);
   ctx.strokeStyle = '#8a97a3';
   ctx.lineWidth = 3;
   ctx.beginPath(); ctx.moveTo(bx0, by); ctx.lineTo(bx1, by); ctx.stroke();
@@ -257,19 +304,19 @@ function drawSide() {
     const n = trail.length;
     for (let k = 0; k < n - 1; k++) {
       const a = trail[k], b = trail[k + 1];
-      const [ax, ay] = worldToScreen(cv, G.bodyX[i] + a.y, -a.z, -0.125, 0.125, -0.135, 0.03);
-      const [bx2, by2] = worldToScreen(cv, G.bodyX[i] + b.y, -b.z, -0.125, 0.125, -0.135, 0.03);
+      const [ax, ay] = worldToScreen(cv, G.bodyX[i] + a.y, -a.z, -0.15, 0.15, -0.155, 0.03);
+      const [bx2, by2] = worldToScreen(cv, G.bodyX[i] + b.y, -b.z, -0.15, 0.15, -0.155, 0.03);
       const alpha = 0.06 + 0.5 * k / n;
       ctx.strokeStyle = G.colors[i] + Math.round(alpha * 255).toString(16).padStart(2, '0');
       ctx.lineWidth = 1.5;
       ctx.beginPath(); ctx.moveTo(ax, ay); ctx.lineTo(bx2, by2); ctx.stroke();
     }
     const foot = trail[n - 1];
-    const [fx, fy] = worldToScreen(cv, G.bodyX[i] + foot.y, -foot.z, -0.125, 0.125, -0.135, 0.03);
+    const [fx, fy] = worldToScreen(cv, G.bodyX[i] + foot.y, -foot.z, -0.15, 0.15, -0.155, 0.03);
     ctx.fillStyle = G.colors[i];
     ctx.beginPath(); ctx.arc(fx, fy, foot.swing ? 6.5 : 4, 0, Math.PI * 2); ctx.fill();
     // 肩点
-    const [sx2, sy2] = worldToScreen(cv, G.bodyX[i], 0, -0.125, 0.125, -0.135, 0.03);
+    const [sx2, sy2] = worldToScreen(cv, G.bodyX[i], 0, -0.15, 0.15, -0.155, 0.03);
     ctx.strokeStyle = G.colors[i];
     ctx.lineWidth = 1;
     ctx.beginPath(); ctx.arc(sx2, sy2, 3, 0, Math.PI * 2); ctx.stroke();
@@ -326,11 +373,12 @@ function drawSignals() {
   ctx.fillStyle = '#141a20';
   ctx.fillRect(0, 0, cv.width, cv.height);
   const W = cv.width, H = cv.height;
-  const t0 = sim.t - 1.2;
-  const px = (t) => (t - t0) / 1.2 * W;
+  const win = G.gait[sim.gait].T;
+  const t0 = sim.t - win;
+  const px = (t) => (t - t0) / win * W;
   const yTop = 40, yBot = H / 2, zTop = H / 2 + 40, zBot = H - 10;
   const yOf = (y) => yTop + (0.05 - Math.min(Math.max(y, -0.05), 0.05)) / 0.1 * (yBot - yTop);
-  const zOf = (z) => zTop + (0.13 - Math.min(Math.max(z, 0.07), 0.13)) / 0.06 * (zBot - zTop);
+  const zOf = (z) => zTop + (0.14 - Math.min(Math.max(z, 0.11), 0.14)) / 0.03 * (zBot - zTop);
 
   ctx.strokeStyle = '#222c36'; ctx.lineWidth = 1;
   ctx.beginPath(); ctx.moveTo(0, yBot); ctx.lineTo(W, yBot); ctx.stroke();
@@ -365,12 +413,18 @@ function drawSignals() {
 const el = {
   vx: document.getElementById('vxSlider'),
   vxVal: document.getElementById('vxVal'),
+  omega: document.getElementById('omegaSlider'),
+  omegaVal: document.getElementById('omegaVal'),
+  h: document.getElementById('hSlider'),
+  hVal: document.getElementById('hVal'),
   speed: document.getElementById('speedSlider'),
   speedVal: document.getElementById('speedVal'),
   pause: document.getElementById('btnPause'),
   reset: document.getElementById('btnReset'),
   btnWalk: document.getElementById('btnWalk'),
   btnTrot: document.getElementById('btnTrot'),
+  btnSpin: document.getElementById('btnSpin'),
+  btnTrotSpinMix: document.getElementById('btnTrotSpinMix'),
   kneeVal: document.getElementById('kneeVal'),
   kneeFill: document.getElementById('kneeFill'),
   paramInfo: document.getElementById('paramInfo'),
@@ -379,28 +433,44 @@ let playing = true;
 let speed = 1.0;
 let lastNow = null;
 
+const GAIT_IDS = {
+  walk: 'btnWalk', trot: 'btnTrot', spin: 'btnSpin', trotSpinMix: 'btnTrotSpinMix',
+};
+const GAIT_NAMES = {
+  walk: 'Walk', trot: 'Trot', spin: 'Spin', trotSpinMix: 'Trot+Spin',
+};
+
 function setGait(name) {
   sim.gait = name;
-  el.btnWalk.classList.toggle('active', name === 'walk');
-  el.btnTrot.classList.toggle('active', name === 'trot');
+  for (const [n, id] of Object.entries(GAIT_IDS)) {
+    el[id].classList.toggle('active', n === name);
+  }
   softReset();
   updateParamInfo();
 }
 
 function updateParamInfo() {
   const p = G.gait[sim.gait];
+  const limit = sim.gait === 'spin'
+    ? `ω 上限 ${(G.kMaxFootSpeed / G.kBodyY[0]).toFixed(1)} rad/s`
+    : `速度上限 ${(p.maxStride / p.strideTime).toFixed(3)} m/s`;
   el.paramInfo.textContent =
-    `${sim.gait === 'walk' ? 'Walk' : 'Trot'}：周期 T=${p.T}s，摆动 ${(p.T * p.swingRatio).toFixed(2)}s，` +
-    `步幅上限 ${p.maxStride.toFixed(4)}m，速度上限 ${(p.maxStride / p.strideTime).toFixed(3)}m/s，` +
-    `相位 [${p.phase.join(', ')}]`;
+    `${GAIT_NAMES[sim.gait]}：周期 T=${p.T}s，摆动 ${(p.T * p.swingRatio).toFixed(2)}s，` +
+    `步幅上限 ${p.maxStride.toFixed(4)}m，${limit}，` +
+    `相位 [${p.phase.join(', ')}]，` +
+    `水平=心形线 profile（摆线时间轴平滑），竖直=复合摆线 lift，抬脚高 h=${G.kStepHeight.toFixed(3)}m`;
 }
 
 el.vx.addEventListener('input', () => { sim.vx = parseFloat(el.vx.value); el.vxVal.textContent = sim.vx.toFixed(3); });
+el.omega.addEventListener('input', () => { sim.omega = parseFloat(el.omega.value); el.omegaVal.textContent = sim.omega.toFixed(2); });
+el.h.addEventListener('input', () => { G.kStepHeight = parseFloat(el.h.value); el.hVal.textContent = G.kStepHeight.toFixed(3); updateParamInfo(); });
 el.speed.addEventListener('input', () => { speed = parseFloat(el.speed.value); el.speedVal.textContent = speed.toFixed(2); });
 el.pause.addEventListener('click', () => { playing = !playing; el.pause.textContent = playing ? '暂停' : '继续'; });
 el.reset.addEventListener('click', softReset);
 el.btnWalk.addEventListener('click', () => setGait('walk'));
 el.btnTrot.addEventListener('click', () => setGait('trot'));
+el.btnSpin.addEventListener('click', () => setGait('spin'));
+el.btnTrotSpinMix.addEventListener('click', () => setGait('trotSpinMix'));
 
 // ============ 主循环 ============
 function frame(now) {
