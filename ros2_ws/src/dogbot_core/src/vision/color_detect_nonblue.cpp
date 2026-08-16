@@ -12,21 +12,32 @@
 namespace dogbot_core::vision
 {
 
-class ColorDetectNode : public rclcpp::Node
+class ColorDetectNonblueNode : public rclcpp::Node
 {
 public:
-  explicit ColorDetectNode(const rclcpp::NodeOptions & opts = rclcpp::NodeOptions())
-  : Node("color_detect_node", opts)
+  explicit ColorDetectNonblueNode(const rclcpp::NodeOptions & opts = rclcpp::NodeOptions())
+  : Node("color_detect_nonblue_node", opts)
   {
-    min_area_ = declare_parameter("min_area", 500);
+    min_area_ = declare_parameter("min_area", 1125);
 
     sub_ = create_subscription<sensor_msgs::msg::Image>(
-      "image_raw", 10,
-      std::bind(&ColorDetectNode::image_callback, this, std::placeholders::_1));
+      "/camera/top/image_raw", 10,
+      std::bind(&ColorDetectNonblueNode::image_callback, this, std::placeholders::_1));
 
-    reg(
-      "blue", std::vector<int64_t>{100, 120, 70}, std::vector<int64_t>{130, 255, 255},
-      std::vector<int64_t>(), std::vector<int64_t>(), cv::Scalar(255, 0, 0));
+    image_pub_ =
+      create_publisher<sensor_msgs::msg::Image>("/vision/color_detect_nonblue/image", 10);
+
+    reg("green", std::vector<int64_t>{40, 50, 50}, std::vector<int64_t>{80, 255, 255},
+      std::vector<int64_t>(), std::vector<int64_t>(), cv::Scalar(0, 255, 0));
+
+    reg("brown", std::vector<int64_t>{10, 50, 30}, std::vector<int64_t>{25, 255, 180},
+      std::vector<int64_t>(), std::vector<int64_t>(), cv::Scalar(42, 42, 165));
+
+    reg("purple", std::vector<int64_t>{130, 50, 50}, std::vector<int64_t>{160, 255, 255},
+      std::vector<int64_t>(), std::vector<int64_t>(), cv::Scalar(240, 32, 160));
+
+    reg("orange", std::vector<int64_t>{5, 120, 70}, std::vector<int64_t>{18, 255, 255},
+      std::vector<int64_t>(), std::vector<int64_t>(), cv::Scalar(0, 165, 255));
   }
 
 private:
@@ -77,6 +88,7 @@ private:
     auto cv_ptr = cv_bridge::toCvCopy(msg, "bgr8");
     cv::Mat frame = cv_ptr->image;
 
+    cv::Mat output = frame.clone();
     cv::Mat hsv;
     cv::cvtColor(frame, hsv, cv::COLOR_BGR2HSV);
 
@@ -99,24 +111,42 @@ private:
       cv::findContours(mask, contours, cv::RETR_EXTERNAL, cv::CHAIN_APPROX_SIMPLE);
 
       bool detected = false;
+      double best_area = min_area_;
+      cv::Rect best_rect;
+
       for (const auto & cnt : contours) {
-        if (cv::contourArea(cnt) >= min_area_) {
+        double area = cv::contourArea(cnt);
+        if (area >= min_area_) {
           detected = true;
-          break;
+          if (area > best_area) {
+            best_area = area;
+            best_rect = cv::boundingRect(cnt);
+          }
         }
       }
 
       auto bool_msg = std_msgs::msg::Bool();
       bool_msg.data = detected;
       entry.pub->publish(bool_msg);
+
+      if (detected) {
+        cv::rectangle(output, best_rect, entry.bgr, 2);
+        cv::putText(
+          output, entry.name, cv::Point(best_rect.x, best_rect.y - 8),
+          cv::FONT_HERSHEY_SIMPLEX, 0.6, entry.bgr, 2);
+      }
     }
+
+    auto image_msg = cv_bridge::CvImage(msg->header, "bgr8", output).toImageMsg();
+    image_pub_->publish(*image_msg);
   }
 
   rclcpp::Subscription<sensor_msgs::msg::Image>::SharedPtr sub_;
+  rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr image_pub_;
   std::vector<ColorEntry> entries_;
   int min_area_;
 };
 
 } // namespace dogbot_core::vision
 
-RCLCPP_COMPONENTS_REGISTER_NODE(dogbot_core::vision::ColorDetectNode)
+RCLCPP_COMPONENTS_REGISTER_NODE(dogbot_core::vision::ColorDetectNonblueNode)

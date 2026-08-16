@@ -24,17 +24,17 @@ public:
         width_continuity_weight_ = declare_parameter("width_continuity_weight", 0.1);
         blur_ksize_              = declare_parameter("gaussian_kernel_size", 5);
         morph_ksize_             = declare_parameter("morph_kernel_size", 3);
-        roi_bottom_ratio_        = declare_parameter("roi_bottom_ratio", 0.6);
+        roi_bottom_ratio_        = declare_parameter("roi_bottom_ratio", 0.72);
         max_gap_rows_            = declare_parameter("max_gap_rows", 5);
         center_smooth_window_    = declare_parameter("center_smooth_window", 9);
-        lookahead_ratio_         = declare_parameter("lookahead_ratio", 0.7);
+        lookahead_ratio_         = declare_parameter("lookahead_ratio", 0.1);
         lookahead_band_ratio_    = declare_parameter("lookahead_band_ratio", 0.12);
         ema_alpha_               = declare_parameter("ema_alpha", 0.25);
-        vx_max_                  = declare_parameter("vx_max", 0.4);
-        kp_angular_              = declare_parameter("kp_angular", 10.0);
+        vx_max_                  = declare_parameter("vx_max", 0.38);
+        kp_angular_              = declare_parameter("kp_angular", 10.5);
 
         sub_ = create_subscription<sensor_msgs::msg::Image>(
-            "image_raw", 10,
+            "/camera/top/image_raw", 10,
             std::bind(&FollowingNode::image_callback, this, std::placeholders::_1));
 
         image_pub_  = create_publisher<sensor_msgs::msg::Image>("/vision/following/image", 10);

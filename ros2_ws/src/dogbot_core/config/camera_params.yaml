@@ -1,6 +1,6 @@
 camera_node:
   ros__parameters:
-    device: "/dev/video0"
+    device: "/dev/video2"
     width: 640
     height: 480
     fps: 30
@@ -11,7 +11,17 @@ rtsp_stream_node:
     enabled: true
     port: 8554
     mount_point: "/cam"
-    bitrate: 2000
+    bitrate: 4000
+
+camera_top_node:
+  ros__parameters:
+    device: "/dev/video0"
+    width: 1280
+    height: 720
+    fps: 30
+    fourcc: "MJPG"
+    topic: "/camera/top/image_raw"
+    rotate: 180
 
 following_node:
   ros__parameters:
@@ -30,15 +40,19 @@ following_node:
     vx_max: 0.4
     kp_angular: 10.0
 
-color_detect_node:
+color_detect:
+  ros__parameters:
+    min_area: 500
+    hsv_blue_lower1: [100, 120, 70]
+    hsv_blue_upper1: [130, 255, 255]
+
+color_detect_nonblue:
   ros__parameters:
     min_area: 500
     hsv_red_lower1: [0, 120, 70]
     hsv_red_upper1: [10, 255, 255]
     hsv_red_lower2: [170, 120, 70]
     hsv_red_upper2: [179, 255, 255]
-    hsv_blue_lower1: [100, 120, 70]
-    hsv_blue_upper1: [130, 255, 255]
     hsv_green_lower1: [40, 50, 50]
     hsv_green_upper1: [80, 255, 255]
     hsv_brown_lower1: [10, 50, 30]

@@ -15,7 +15,7 @@ public:
   explicit CameraNode(const rclcpp::NodeOptions & opts = rclcpp::NodeOptions())
   : Node("camera_node", opts)
   {
-    device_ = declare_parameter("device", "/dev/video0");
+    device_ = declare_parameter("device", "/dev/video2");
     width_ = declare_parameter("width", 640);
     height_ = declare_parameter("height", 480);
     fps_ = declare_parameter("fps", 30);

@@ -30,6 +30,7 @@ def generate_launch_description():
         executable='component_container',
         name='dogbot_container',
         output='screen',
+        prefix='taskset -c 0,1',
     )
 
     vision_container = Node(
@@ -37,6 +38,7 @@ def generate_launch_description():
         executable='component_container_mt',
         name='vision_container',
         output='screen',
+        prefix='taskset -c 2,3',
     )
 
     load_dogbot = LoadComposableNodes(
@@ -66,6 +68,12 @@ def generate_launch_description():
                 parameters=[camera_params],
             ),
             ComposableNode(
+                package='dogbot_core',
+                plugin='dogbot_core::camera::CameraTopNode',
+                name='camera_top',
+                parameters=[camera_params],
+            ),
+            ComposableNode(
                 package='dogbot_core', 
                 plugin='dogbot_core::vision::FollowingNode',
                 name='following', 
@@ -76,7 +84,18 @@ def generate_launch_description():
                 plugin='dogbot_core::vision::ColorDetectNode',
                 name='color_detect',
                 parameters=[camera_params],
-            )
+            ),
+            ComposableNode(
+                package='dogbot_core',
+                plugin='dogbot_core::vision::ColorDetectNonblueNode',
+                name='color_detect_nonblue',
+                parameters=[camera_params],
+            ),
+            ComposableNode(
+                package='dogbot_core',
+                plugin='dogbot_core::vision::ColorListenerNode',
+                name='color_listener',
+            ),
         ],
     )
 

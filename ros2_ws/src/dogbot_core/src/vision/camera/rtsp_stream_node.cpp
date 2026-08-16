@@ -35,7 +35,7 @@ public:
         fps_         = declare_parameter("fps", 30);
 
         sub_ = create_subscription<sensor_msgs::msg::Image>(
-            "/vision/following/image", 10,
+            "/vision/color_detect_nonblue/image", 10,
             std::bind(&RtspStreamNode::image_callback, this, std::placeholders::_1));
 
         gst_init(nullptr, nullptr);
@@ -99,10 +99,26 @@ private:
 
         g_signal_connect(appsrc, "need-data", G_CALLBACK(need_data), self);
 
+        // 等待第一帧，按实际接收尺寸设置 caps（最多 2s，超时回退参数）
+        int width  = self->width_;
+        int height = self->height_;
+        for (int i = 0; i < 40; ++i) {
+            {
+                std::lock_guard<std::mutex> lock(self->frame_mutex_);
+                if (!self->current_frame_.empty()) {
+                    width  = self->current_frame_.cols;
+                    height = self->current_frame_.rows;
+                    break;
+                }
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        }
+
+        RCLCPP_INFO(self->get_logger(), "RTSP stream caps: %dx%d@%d", width, height, self->fps_);
+
         GstCaps* caps = gst_caps_new_simple(
-            "video/x-raw", "format", G_TYPE_STRING, "BGR", "width", G_TYPE_INT, self->width_,
-            "height", G_TYPE_INT, self->height_, "framerate", GST_TYPE_FRACTION, self->fps_, 1,
-            nullptr);
+            "video/x-raw", "format", G_TYPE_STRING, "BGR", "width", G_TYPE_INT, width, "height",
+            G_TYPE_INT, height, "framerate", GST_TYPE_FRACTION, self->fps_, 1, nullptr);
         g_object_set(appsrc, "caps", caps, "is-live", TRUE, "format", GST_FORMAT_TIME, nullptr);
         gst_caps_unref(caps);
 

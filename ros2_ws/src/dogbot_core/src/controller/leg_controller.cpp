@@ -11,6 +11,7 @@
 #include <geometry_msgs/msg/twist.hpp>
 #include <memory>
 #include <numbers>
+#include <rclcpp/logging.hpp>
 #include <rclcpp/publisher.hpp>
 #include <rclcpp/rclcpp.hpp>
 #include <rclcpp_components/register_node_macro.hpp>
@@ -54,6 +55,10 @@ public:
                 vision_twist_     = *msg;
                 last_vision_time_ = this->now();
             });
+
+        turn_omega_sub_ = create_subscription<std_msgs::msg::Float64>(
+            "/vision/color/turn_omega", 10,
+            [this](const std_msgs::msg::Float64::SharedPtr msg) { turn_omega_ = msg->data; });
 
         // 动态抬腿高度参数（上坡/下坡时按 IMU pitch 调整摆动腿抬脚高度）：
         //  - pitch_lift_gain：加高增益 (m/rad)，每 1 弧度 pitch 增加多少抬脚高度；
@@ -165,7 +170,12 @@ private:
             bool stale   = (this->now() - last_vision_time_).seconds() > vision_timeout_;
             double vx    = stale ? 0.0 : -vision_twist_.linear.x;
             double omega = stale ? 0.0 : vision_twist_.angular.z;
-            solver_update(feet_update(vx, omega));
+            
+            if (turn_omega_ != 0.0) {
+                solver_update(feet_update(0.0, turn_omega_));
+            } else {
+                solver_update(feet_update(vx, omega));
+            }
             break;
         }
         default: reset_all_controller(); break;
@@ -283,11 +293,13 @@ private:
     geometry_msgs::msg::Twist vision_twist_;
     rclcpp::Time last_vision_time_{0, 0, RCL_ROS_TIME};
     double vision_timeout_ = 0.5;
+    double turn_omega_     = 0.0;
 
     rclcpp::Subscription<dogbot_msg::msg::GamepadState>::SharedPtr gamepad_state_sub_;
     rclcpp::Subscription<std_msgs::msg::Float64>::SharedPtr theta_sub_;
     rclcpp::Subscription<std_msgs::msg::Float64>::SharedPtr imu_pitch_sub_;
     rclcpp::Subscription<geometry_msgs::msg::Twist>::SharedPtr vision_cmd_sub_;
+    rclcpp::Subscription<std_msgs::msg::Float64>::SharedPtr turn_omega_sub_;
     rclcpp::Publisher<std_msgs::msg::Float64>::SharedPtr pub_hip_[4];
     rclcpp::Publisher<std_msgs::msg::Float64>::SharedPtr pub_knee_[4];
     rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr pub_thrower_left_;
