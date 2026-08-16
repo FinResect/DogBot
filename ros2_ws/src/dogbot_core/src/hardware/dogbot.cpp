@@ -57,7 +57,7 @@ public:
         hip_[2].setPWMOffset(0);
 
         hip_[3].init(this, "right_front_hip", 3, 0.0, 270.0);
-        hip_[3].setPWMOffset(-125);
+        hip_[3].setPWMOffset(-150);
         for (uint8_t i = 0; i < 4; i++) {
             hip_[i].setPWMLimits(830, 2200);
         }

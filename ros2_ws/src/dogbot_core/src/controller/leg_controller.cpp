@@ -16,8 +16,8 @@
 #include <rclcpp/rclcpp.hpp>
 #include <rclcpp_components/register_node_macro.hpp>
 #include <std_msgs/msg/bool.hpp>
-#include <std_msgs/msg/detail/bool__struct.hpp>
 #include <std_msgs/msg/float64.hpp>
+#include <std_msgs/msg/int64.hpp>
 #include <string>
 
 namespace dogbot_core::controller {
@@ -59,6 +59,18 @@ public:
         turn_omega_sub_ = create_subscription<std_msgs::msg::Float64>(
             "/vision/color/turn_omega", 10,
             [this](const std_msgs::msg::Float64::SharedPtr msg) { turn_omega_ = msg->data; });
+
+        thrower_controller_sub_ = create_subscription<std_msgs::msg::Int64>(
+            "/vision/color/thrower_controller", 10,
+            [this](const std_msgs::msg::Int64::SharedPtr msg) { thrower_controller_ = msg->data; });
+
+        place_controller_sub_ = create_subscription<std_msgs::msg::Bool>(
+            "/vision/color/place_controller", 10,
+            [this](const std_msgs::msg::Bool::SharedPtr msg) { place_controller_ = msg->data; });
+
+        climb_controller_sub_ = create_subscription<std_msgs::msg::Bool>(
+            "/vision/color/climb_controller", 10,
+            [this](const std_msgs::msg::Bool::SharedPtr msg) { climb_controller_ = msg->data; });
 
         // 动态抬腿高度参数（上坡/下坡时按 IMU pitch 调整摆动腿抬脚高度）：
         //  - pitch_lift_gain：加高增益 (m/rad)，每 1 弧度 pitch 增加多少抬脚高度；
@@ -105,18 +117,16 @@ private:
 
         using namespace dogbot_msg::msg;
 
-        auto button_x       = gamepad_state_.buttons.x;
-        auto button_y       = gamepad_state_.buttons.y;
-        auto button_a       = gamepad_state_.buttons.a;
-        auto button_b       = gamepad_state_.buttons.b;
-        auto button_up      = gamepad_state_.dpad.up;
-        auto button_left    = gamepad_state_.dpad.left;
-        auto button_right   = gamepad_state_.dpad.right;
-        auto button_start   = gamepad_state_.buttons.start;
-        auto button_mode    = gamepad_state_.buttons.mode;
-        auto button_l1      = gamepad_state_.shoulders.l1;
-        auto joystick_left  = gamepad_state_.sticks.joystick_left;
-        auto joystick_right = gamepad_state_.sticks.joystick_right;
+        auto button_x     = gamepad_state_.buttons.x;
+        auto button_y     = gamepad_state_.buttons.y;
+        auto button_a     = gamepad_state_.buttons.a;
+        auto button_b     = gamepad_state_.buttons.b;
+        auto button_up    = gamepad_state_.dpad.up;
+        auto button_left  = gamepad_state_.dpad.left;
+        auto button_right = gamepad_state_.dpad.right;
+        auto button_start = gamepad_state_.buttons.start;
+        auto button_mode  = gamepad_state_.buttons.mode;
+        auto button_l1    = gamepad_state_.shoulders.l1;
 
         static std_msgs::msg::Bool left_msg;
         static std_msgs::msg::Bool right_msg;
@@ -131,12 +141,11 @@ private:
 
         if (button_left && !last_button_left) {
             left_msg.data = !left_msg.data;
+            pub_thrower_left_->publish(left_msg);
         } else if (button_right && !last_button_right) {
             right_msg.data = !right_msg.data;
+            pub_thrower_right_->publish(right_msg);
         }
-
-        pub_thrower_left_->publish(left_msg);
-        pub_thrower_right_->publish(right_msg);
 
         if (button_start && !last_button_start) {
             gait_.set_gait_type(GaitType::Stand);
@@ -161,25 +170,7 @@ private:
             controller_mode_ = dogbot_msg::ControllerMode::Vision;
         }
 
-        switch (controller_mode_) {
-        case dogbot_msg::ControllerMode::Auto: solver_update(feet_update(-0.2, -5.0)); break;
-        case dogbot_msg::ControllerMode::Manual:
-            solver_update(feet_update(-0.4 * joystick_left.y, 10.0 * joystick_right.x));
-            break;
-        case dogbot_msg::ControllerMode::Vision: {
-            bool stale   = (this->now() - last_vision_time_).seconds() > vision_timeout_;
-            double vx    = stale ? 0.0 : -vision_twist_.linear.x;
-            double omega = stale ? 0.0 : vision_twist_.angular.z;
-            
-            if (turn_omega_ != 0.0) {
-                solver_update(feet_update(0.0, turn_omega_));
-            } else {
-                solver_update(feet_update(vx, omega));
-            }
-            break;
-        }
-        default: reset_all_controller(); break;
-        }
+        controller_update();
 
         last_button_a     = button_a;
         last_button_b     = button_b;
@@ -271,6 +262,55 @@ private:
         }
     }
 
+    void thrower_controller(bool left, bool right) {
+        std_msgs::msg::Bool left_msg;
+        std_msgs::msg::Bool right_msg;
+
+        left_msg.data  = left;
+        right_msg.data = right;
+
+        pub_thrower_left_->publish(left_msg);
+        pub_thrower_right_->publish(right_msg);
+    }
+
+    void controller_update() {
+        switch (controller_mode_) {
+        case dogbot_msg::ControllerMode::Auto: solver_update(feet_update(-0.2, -5.0)); break;
+        case dogbot_msg::ControllerMode::Manual:
+            solver_update(feet_update(
+                -0.4 * gamepad_state_.sticks.joystick_left.y,
+                10.0 * gamepad_state_.sticks.joystick_right.x));
+            break;
+        case dogbot_msg::ControllerMode::Vision: {
+            bool stale   = (this->now() - last_vision_time_).seconds() > vision_timeout_;
+            double vx    = stale ? 0.0 : -vision_twist_.linear.x;
+            double omega = stale ? 0.0 : vision_twist_.angular.z;
+
+            if (turn_omega_ != 0.0) {
+                vx    = 0.0;
+                omega = turn_omega_;
+            } else if (thrower_controller_ == 0) {
+                thrower_controller(false, false);
+            } else if (thrower_controller_ == 1) {
+                thrower_controller(true, false);
+            } else if (thrower_controller_ == 2) {
+                thrower_controller(false, true);
+            } else if (place_controller_) {
+                ;
+                ;                      // TODO:
+            } else if (climb_controller_) {
+                ;
+                ;
+            } else {
+            }
+
+            solver_update(feet_update(vx, omega));
+            break;
+        }
+        default: reset_all_controller(); break;
+        }
+    }
+
     dogbot_msg::msg::GamepadState gamepad_state_;
     Gait gait_;
     std::unique_ptr<LegSolver> solver_;
@@ -292,14 +332,20 @@ private:
 
     geometry_msgs::msg::Twist vision_twist_;
     rclcpp::Time last_vision_time_{0, 0, RCL_ROS_TIME};
-    double vision_timeout_ = 0.5;
-    double turn_omega_     = 0.0;
+    double vision_timeout_      = 0.5;
+    double turn_omega_          = 0.0;
+    int64_t thrower_controller_ = 0;
+    bool place_controller_      = false;
+    bool climb_controller_      = false;
 
     rclcpp::Subscription<dogbot_msg::msg::GamepadState>::SharedPtr gamepad_state_sub_;
     rclcpp::Subscription<std_msgs::msg::Float64>::SharedPtr theta_sub_;
     rclcpp::Subscription<std_msgs::msg::Float64>::SharedPtr imu_pitch_sub_;
     rclcpp::Subscription<geometry_msgs::msg::Twist>::SharedPtr vision_cmd_sub_;
     rclcpp::Subscription<std_msgs::msg::Float64>::SharedPtr turn_omega_sub_;
+    rclcpp::Subscription<std_msgs::msg::Int64>::SharedPtr thrower_controller_sub_;
+    rclcpp::Subscription<std_msgs::msg::Bool>::SharedPtr place_controller_sub_;
+    rclcpp::Subscription<std_msgs::msg::Bool>::SharedPtr climb_controller_sub_;
     rclcpp::Publisher<std_msgs::msg::Float64>::SharedPtr pub_hip_[4];
     rclcpp::Publisher<std_msgs::msg::Float64>::SharedPtr pub_knee_[4];
     rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr pub_thrower_left_;
