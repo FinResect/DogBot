@@ -92,15 +92,18 @@ private:
     cv::Mat hsv;
     cv::cvtColor(frame, hsv, cv::COLOR_BGR2HSV);
 
+    int h_start = frame.rows * 2 / 3;
+    cv::Mat hsv_roi = hsv(cv::Rect(0, h_start, frame.cols, frame.rows - h_start));
+
     cv::Mat kernel = cv::getStructuringElement(cv::MORPH_ELLIPSE, cv::Size(4, 4));
 
     for (auto & entry : entries_) {
       cv::Mat mask;
-      cv::inRange(hsv, entry.lower1, entry.upper1, mask);
+      cv::inRange(hsv_roi, entry.lower1, entry.upper1, mask);
 
       if (entry.has_range2) {
         cv::Mat mask2;
-        cv::inRange(hsv, entry.lower2, entry.upper2, mask2);
+        cv::inRange(hsv_roi, entry.lower2, entry.upper2, mask2);
         cv::bitwise_or(mask, mask2, mask);
       }
 
@@ -130,6 +133,7 @@ private:
       entry.pub->publish(bool_msg);
 
       if (detected) {
+        best_rect.y += h_start;
         cv::rectangle(output, best_rect, entry.bgr, 2);
         cv::putText(
           output, entry.name, cv::Point(best_rect.x, best_rect.y - 8),

@@ -61,12 +61,12 @@ def generate_launch_description():
     load_camera = LoadComposableNodes(
         target_container='vision_container',
         composable_node_descriptions=[
-            ComposableNode(
-                package='dogbot_core',
-                plugin='dogbot_core::camera::CameraNode',
-                name='camera',
-                parameters=[camera_params],
-            ),
+            # ComposableNode(
+            #     package='dogbot_core',
+            #     plugin='dogbot_core::camera::CameraNode',
+            #     name='camera',
+            #     parameters=[camera_params],
+            # ),
             ComposableNode(
                 package='dogbot_core',
                 plugin='dogbot_core::camera::CameraTopNode',

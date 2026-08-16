@@ -38,14 +38,14 @@ public:
 
         climb_pub_ = create_publisher<std_msgs::msg::Bool>("/vision/color/climb_controller", 10);
 
-        turn_watchdog.reset(10000);
-        turn_omega_delay_watchdog.reset(10000);
-        thrower_watchdog.reset(10000);
-        thrower_detect_delay_watchdog.reset(10000);
-        place_watchdog.reset(10000);
-        place_detect_delay_watchdog.reset(10000);
-        climb_watchdog.reset(10000);
-        climb_detect_delay_watchdog.reset(10000);
+        turn_watchdog.reset(0);
+        turn_omega_delay_watchdog.reset(0);
+        thrower_watchdog.reset(0);
+        thrower_detect_delay_watchdog.reset(0);
+        place_watchdog.reset(0);
+        place_detect_delay_watchdog.reset(0);
+        climb_watchdog.reset(0);
+        climb_detect_delay_watchdog.reset(0);
     }
 
     bool isDetected(const std::string& name) const {
@@ -67,7 +67,7 @@ private:
         static bool is_detected{false};
 
         if (isDetected("green")) {
-            turn_watchdog.reset(200);                 // time from 'color disappear' to 'turn'
+            turn_watchdog.reset(200);                  // time from 'color disappear' to 'turn'
             is_detected = true;
         }
 
@@ -77,41 +77,48 @@ private:
 
             if (turn_watchdog.tick()) {
                 if (is_first) {
-                    msg.data = kTurnOmega;
-                } else {
                     msg.data = -kTurnOmega;
+                } else {
+                    msg.data = kTurnOmega;
                 }
 
                 turn_omega_pub_->publish(msg);
                 is_omega_pub = true;
-                turn_omega_delay_watchdog.reset(200); // turn delay time
+                turn_omega_delay_watchdog.reset(200);  // turn delay time
                 return;
             }
             if (is_omega_pub) {
                 if (turn_omega_delay_watchdog.tick()) {
                     is_detected  = false;
                     is_omega_pub = false;
+                    msg.data     = 0.0;
                 }
             }
         }
-
-        msg.data = 0.0;
 
         turn_omega_pub_->publish(msg);
     }
 
     void task_thrower_update() {
         static auto msg = std_msgs::msg::Int64();
-        bool is_detected{false};
+        static bool is_detected{false};
 
-        bool if_detect{true};
+        static bool if_detect{true};
+
+        static bool flag{false};
 
         if (is_detected) {
             if (thrower_watchdog.tick()) {
-                msg.data    = 0;
+                if (!flag) {
+                    msg.data = 1;
+                    flag     = !flag;
+                } else
+                    msg.data = 2;
                 is_detected = false;
             }
-            thrower_detect_delay_watchdog.reset(2000);
+            thrower_detect_delay_watchdog.reset(2000); // ignore color time
+            thrower_pub_->publish(msg);
+            RCLCPP_INFO(get_logger(), "%ld", msg.data);
             return;
         }
 
@@ -122,11 +129,11 @@ private:
 
         if (if_detect) {
             if (isDetected("brown")) {
-                msg.data    = 1;
+                msg.data    = 0;
                 is_detected = true;
                 if_detect   = false;
             } else if (isDetected("purple")) {
-                msg.data    = 2;
+                msg.data    = 0;
                 is_detected = true;
                 if_detect   = false;
             } else {
@@ -134,48 +141,35 @@ private:
             }
         }
 
-        thrower_detect_delay_watchdog.reset(2000);    // ignore color time
-
-        thrower_watchdog.reset(200);                  // execution time
+        thrower_watchdog.reset(8880);                  // execution time
 
         thrower_pub_->publish(msg);
     }
 
     void task_place_update() {
         static auto msg = std_msgs::msg::Bool();
-        bool is_detected{false};
+        static bool is_detected{false};
 
-        bool if_detect{true};
+        static bool if_detect{true};
 
         if (is_detected) {
             if (place_watchdog.tick()) {
-                msg.data = true;
+                msg.data = false;
 
                 is_detected = false;
             }
-            place_detect_delay_watchdog.reset(2000);
+            place_detect_delay_watchdog.reset(2000);   // ignore color time
             return;
         }
 
         if (place_detect_delay_watchdog.tick()) {
-            if_detect = true;
+            if_detect = false;
             msg.data  = false;
         }
 
-        // if (if_detect) {
-        //     if (isDetected("orange")) {
-        //         msg.data = true;
-
-        //         is_detected = true;
-        //         if_detect   = false;
-        //     } else {
-        //         msg.data = 0;
-        //     }
-        // }
-
         if (if_detect) {
-            if (isDetected("green")) {
-                msg.data = false;
+            if (isDetected("orange")) {
+                msg.data = true;
 
                 is_detected = true;
                 if_detect   = false;
@@ -184,18 +178,16 @@ private:
             }
         }
 
-        place_detect_delay_watchdog.reset(2000); // ignore color time
-
-        place_watchdog.reset(200);               // execution time
+        place_watchdog.reset(200);                     // execution time
 
         place_pub_->publish(msg);
     }
 
     void task_climb_update() {
         static auto msg = std_msgs::msg::Bool();
-        bool is_detected{false};
+        static bool is_detected{false};
 
-        bool if_detect{true};
+        static bool if_detect{true};
 
         if (is_detected) {
             if (climb_watchdog.tick()) {
@@ -203,7 +195,7 @@ private:
 
                 is_detected = false;
             }
-            climb_detect_delay_watchdog.reset(2000);
+            climb_detect_delay_watchdog.reset(2000);   // ignore color time
             return;
         }
 
@@ -222,16 +214,14 @@ private:
             }
         }
 
-        climb_detect_delay_watchdog.reset(2000); // ignore color time
-
-        climb_watchdog.reset(200);               // execution time
+        climb_watchdog.reset(200);                     // execution time
 
         climb_pub_->publish(msg);
     }
 
     static const inline std::vector<std::string> kColors = {"red",   "blue",   "green",
                                                             "brown", "purple", "orange"};
-    static constexpr double kTurnOmega                   = 4.0;
+    static constexpr double kTurnOmega                   = 5.0;
 
     controller::tick::TickTimer turn_watchdog;
     controller::tick::TickTimer turn_omega_delay_watchdog;
