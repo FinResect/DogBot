@@ -4,7 +4,9 @@
 #include <std_msgs/msg/float64.hpp>
 
 #include <algorithm>
+#include <cctype>
 #include <cmath>
+#include <cstdint>
 #include <iomanip>
 #include <sstream>
 #include <stdexcept>
@@ -105,6 +107,24 @@ public:
         auto msg = std_msgs::msg::Float64();
         msg.data = torque;
         torque_pub_->publish(msg);
+    }
+
+    void store(const std::string& packet) {
+        if (packet.size() < 10 || packet.front() != '#' || packet.back() != '!'
+            || packet[4] != 'P') {
+            return;
+        }
+        const std::string id_str  = packet.substr(1, 3);
+        const std::string pwm_str = packet.substr(5, 4);
+        for (const char c : id_str + pwm_str) {
+            if (!std::isdigit(static_cast<unsigned char>(c))) {
+                return;
+            }
+        }
+        if (std::stoi(id_str) != servo_id_) {
+            return;
+        }
+        publishAngle(pwmToAngle(static_cast<uint16_t>(std::stoul(pwm_str))));
     }
 
     std::string generateReadVersion() const { return makeCommand("VER"); }

@@ -1,17 +1,16 @@
 #include <rclcpp/rclcpp.hpp>
 #include <rclcpp_components/register_node_macro.hpp>
 
-#include <atomic>
-#include <chrono>
-#include <memory>
-#include <string>
-#include <thread>
-
 #include "device/IMU660RB.hpp"
 #include "device/TD-8120MG.hpp"
 #include "device/ZX30S.hpp"
 #include "device/gamepad.hpp"
 #include "serial/serial.hpp"
+#include <atomic>
+#include <chrono>
+#include <memory>
+#include <string>
+#include <thread>
 
 namespace dogbot_core::hardware {
 class DogBot : public rclcpp::Node {
@@ -72,8 +71,9 @@ public:
         }
 
         using namespace std::chrono_literals;
-        timer_      = this->create_wall_timer(2ms, std::bind(&DogBot::update, this));
-        imu_thread_ = std::thread(&DogBot::imu_loop, this);
+        timer_         = this->create_wall_timer(2ms, std::bind(&DogBot::update, this));
+        imu_thread_    = std::thread(&DogBot::imu_loop, this);
+        serial_thread_ = std::thread(&DogBot::serial_loop, this);
 
         RCLCPP_INFO(
             this->get_logger(), "DogBot ready, 8 servos on %s", serial_.getDevice().c_str());
@@ -83,6 +83,10 @@ public:
         imu_stop_.store(true);
         if (imu_thread_.joinable()) {
             imu_thread_.join();
+        }
+        serial_stop_.store(true);
+        if (serial_thread_.joinable()) {
+            serial_thread_.join();
         }
     }
 
@@ -115,6 +119,22 @@ private:
                 std::this_thread::sleep_for(std::chrono::milliseconds(10));
             }
         }
+        read_position_update(clock);
+    }
+
+    void read_position_update(const rclcpp::Clock::SharedPtr& clock) {
+        device::ZX30S* batch = rad_even_ ? knee_ : hip_;
+        for (int i = 0; i < 4; i++) {
+            try {
+                serial_.writeString(batch[i].generateReadPosition());
+            } catch (const std::exception& e) {
+                RCLCPP_ERROR_THROTTLE(
+                    this->get_logger(), *clock, 1000, "Read position ID=%d failed: %s",
+                    batch[i].getServoId(), e.what());
+                std::this_thread::sleep_for(std::chrono::milliseconds(10));
+            }
+        }
+        rad_even_ = !rad_even_;
     }
 
     void thrower_update() {
@@ -147,6 +167,77 @@ private:
         }
     }
 
+    void serial_loop() {
+        uint8_t buf[64];
+        while (!serial_stop_.load()) {
+            const ssize_t n = serial_.readAvailable(buf, sizeof(buf), 0);
+            if (n > 0) {
+                rx_buffer_.append(reinterpret_cast<const char*>(buf), static_cast<size_t>(n));
+                dispatchPackets();
+            } else {
+                std::this_thread::sleep_for(std::chrono::milliseconds(1));
+            }
+        }
+    }
+
+    void dispatchPackets() {
+        while (true) {
+            const auto start = rx_buffer_.find('#');
+            if (start == std::string::npos) {
+                rx_buffer_.clear();
+                return;
+            }
+            if (start > 0) {
+                rx_buffer_.erase(0, start);
+            }
+            const auto end = rx_buffer_.find('!');
+            if (end == std::string::npos) {
+                if (rx_buffer_.size() > kMaxRxBufferSize) {
+                    RCLCPP_WARN_THROTTLE(
+                        this->get_logger(), *this->get_clock(), 1000,
+                        "Dropping unparsable serial buffer (%zu bytes)", rx_buffer_.size());
+                    rx_buffer_.clear();
+                }
+                return;
+            }
+            handlePacket(rx_buffer_.substr(0, end + 1));
+            rx_buffer_.erase(0, end + 1);
+        }
+    }
+
+    void handlePacket(const std::string& packet) {
+        if (packet.size() != 10 || packet[4] != 'P') {
+            return;
+        }
+        int id = 0;
+        try {
+            id = std::stoi(packet.substr(1, 3));
+        } catch (const std::exception&) {
+            return;
+        }
+        if (id == knee_[0].getServoId()) {
+            knee_[0].store(packet);
+        } else if (id == knee_[1].getServoId()) {
+            knee_[1].store(packet);
+        } else if (id == knee_[2].getServoId()) {
+            knee_[2].store(packet);
+        } else if (id == knee_[3].getServoId()) {
+            knee_[3].store(packet);
+        } else if (id == hip_[0].getServoId()) {
+            hip_[0].store(packet);
+        } else if (id == hip_[1].getServoId()) {
+            hip_[1].store(packet);
+        } else if (id == hip_[2].getServoId()) {
+            hip_[2].store(packet);
+        } else if (id == hip_[3].getServoId()) {
+            hip_[3].store(packet);
+        } else {
+            RCLCPP_WARN_THROTTLE(
+                this->get_logger(), *this->get_clock(), 1000, "Unknown servo packet: %s",
+                packet.c_str());
+        }
+    }
+
     SerialPort serial_;
     device::Gamepad gamepad_;
     device::IMU660RB imu_;
@@ -158,6 +249,12 @@ private:
     std::thread imu_thread_;
     std::atomic<bool> imu_stop_{false};
     static constexpr int kImuPeriodMs = 5; // 200Hz 采样（陀螺 ODR 208Hz）
+
+    std::thread serial_thread_;
+    std::atomic<bool> serial_stop_{false};
+    std::string rx_buffer_;
+    bool rad_even_                           = true;
+    static constexpr size_t kMaxRxBufferSize = 256;
 };
 } // namespace dogbot_core::hardware
 
