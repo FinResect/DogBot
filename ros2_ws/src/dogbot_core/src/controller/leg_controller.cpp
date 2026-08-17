@@ -1,3 +1,4 @@
+#include "action/action.hpp"
 #include "controller/gait.hpp"
 #include "controller/leg_solver.hpp"
 #include "controller_mode.hpp"
@@ -95,6 +96,9 @@ public:
             "/imu/pitch", 10, [this](const std_msgs::msg::Float64::SharedPtr msg) {
                 pitch_filt_ = pitch_ema_alpha_ * msg->data + (1.0 - pitch_ema_alpha_) * pitch_filt_;
             });
+        imu_yaw_sub_ = create_subscription<std_msgs::msg::Float64>(
+            "/imu/yaw", 10,
+            [this](const std_msgs::msg::Float64::SharedPtr msg) { imu_yaw_ = msg->data; });
 
         pub_thrower_left_  = create_publisher<std_msgs::msg::Bool>("/thrower/left/enable", 10);
         pub_thrower_right_ = create_publisher<std_msgs::msg::Bool>("/thrower/right/enable", 10);
@@ -238,24 +242,6 @@ private:
             std_msgs::msg::Float64 knee_msg;
             hip_msg.data  = angles.hip * 180.0 / std::numbers::pi;
             knee_msg.data = angles.knee * 180.0 / std::numbers::pi;
-            // switch (i) {
-            // case 0:
-            //     hip_msg.data += 5.0;
-            //     knee_msg.data += 0.0;
-            //     break;
-            // case 1:
-            //     hip_msg.data += -10.0 + 1.0;
-            //     knee_msg.data += 0.0 - 30.0 + 5.0 + 5.0;
-            //     break;
-            // case 2:
-            //     hip_msg.data += 0.0 + 1.0;
-            //     knee_msg.data += -25.0 - 8.0 + 5.0 + 5.0;
-            //     break;
-            // case 3:
-            //     hip_msg.data += 0.0;
-            //     knee_msg.data += -35.0;
-            //     break;
-            // }
 
             pub_hip_[i]->publish(hip_msg);
             pub_knee_[i]->publish(knee_msg);
@@ -296,12 +282,14 @@ private:
             } else if (thrower_controller_ == 2) {
                 thrower_controller(false, true);
             } else if (place_controller_) {
-                ;
-                ;                      // TODO:
+                action_.start_place(imu_yaw_);
+                action_.update(imu_yaw_, vx, omega);
             } else if (climb_controller_) {
                 ;
                 ;
             } else {
+                action_.abort();
+                thrower_controller(false, false);
             }
 
             solver_update(feet_update(vx, omega));
@@ -315,6 +303,7 @@ private:
     Gait gait_;
     std::unique_ptr<LegSolver> solver_;
     dogbot_msg::ControllerMode controller_mode_{dogbot_msg::ControllerMode::None};
+    action::Action action_;
 
     uint8_t last_button_x     = 0;
     uint8_t last_button_y     = 0;
@@ -341,6 +330,7 @@ private:
     rclcpp::Subscription<dogbot_msg::msg::GamepadState>::SharedPtr gamepad_state_sub_;
     rclcpp::Subscription<std_msgs::msg::Float64>::SharedPtr theta_sub_;
     rclcpp::Subscription<std_msgs::msg::Float64>::SharedPtr imu_pitch_sub_;
+    rclcpp::Subscription<std_msgs::msg::Float64>::SharedPtr imu_yaw_sub_;
     rclcpp::Subscription<geometry_msgs::msg::Twist>::SharedPtr vision_cmd_sub_;
     rclcpp::Subscription<std_msgs::msg::Float64>::SharedPtr turn_omega_sub_;
     rclcpp::Subscription<std_msgs::msg::Int64>::SharedPtr thrower_controller_sub_;
@@ -351,6 +341,8 @@ private:
     rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr pub_thrower_left_;
     rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr pub_thrower_right_;
     rclcpp::TimerBase::SharedPtr timer_;
+
+    double imu_yaw_ = 0.0;
 
     double pitch_filt_         = 0.0;  // IMU pitch 低通后（弧度）
     double pitch_lift_gain_    = 0.1;  // ΔH 增益（m/rad）
