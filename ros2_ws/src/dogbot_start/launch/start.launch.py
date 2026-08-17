@@ -30,6 +30,7 @@ def generate_launch_description():
         executable='component_container',
         name='dogbot_container',
         output='screen',
+        # prefix='taskset -c 0,1',
     )
 
     vision_container = Node(
@@ -37,6 +38,7 @@ def generate_launch_description():
         executable='component_container_mt',
         name='vision_container',
         output='screen',
+        # prefix='taskset -c 2,3',
     )
 
     load_dogbot = LoadComposableNodes(
@@ -59,12 +61,12 @@ def generate_launch_description():
     load_camera = LoadComposableNodes(
         target_container='vision_container',
         composable_node_descriptions=[
-            # ComposableNode(
-            #     package='dogbot_core',
-            #     plugin='dogbot_core::camera::CameraNode',
-            #     name='camera',
-            #     parameters=[camera_params],
-            # ),
+            ComposableNode(
+                package='dogbot_core',
+                plugin='dogbot_core::camera::CameraNode',
+                name='camera',
+                parameters=[camera_params],
+            ),
             ComposableNode(
                 package='dogbot_core',
                 plugin='dogbot_core::camera::CameraTopNode',

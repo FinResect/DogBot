@@ -154,9 +154,9 @@ private:
 class Climb {
 public:
     struct Params {
-        double vx             = 0.1; // 恒定线速度 (m/s)
-        double omega_max      = 0.8; // yaw 保持角速度上限 (rad/s)
-        double yaw_gain       = 3.0; // yaw 保持 P 控制增益 (1/s)
+        double vx             = 0.3; // 恒定线速度 (m/s)
+        double omega_max      = 0.5; // yaw 保持角速度上限 (rad/s)
+        double yaw_gain       = 2.0; // yaw 保持 P 控制增益 (1/s)
         double angle_tol_deg  = 2.0; // yaw 死区（度）
         double pitch_rise_deg = 8.0; // pitch 超过该值判定上坡 (度)
         double pitch_fall_deg = 0.0; // 上坡后 pitch 回落低于该值判定完成 (度)
