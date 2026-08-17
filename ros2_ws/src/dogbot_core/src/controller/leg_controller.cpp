@@ -174,6 +174,8 @@ private:
             controller_mode_ = dogbot_msg::ControllerMode::Vision;
         }
 
+        // RCLCPP_INFO(get_logger(), "pitch:%lf", pitch_filt_);
+
         controller_update();
 
         last_button_a     = button_a;
@@ -283,10 +285,10 @@ private:
                 thrower_controller(false, true);
             } else if (place_controller_) {
                 action_.start_place(imu_yaw_);
-                action_.update(imu_yaw_, vx, omega);
+                action_.update(imu_yaw_, pitch_filt_, vx, omega);
             } else if (climb_controller_) {
-                ;
-                ;
+                action_.start_climb(imu_yaw_);
+                action_.update(imu_yaw_, pitch_filt_, vx, omega);
             } else {
                 action_.abort();
                 thrower_controller(false, false);
