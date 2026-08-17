@@ -105,20 +105,12 @@ private:
 
         static bool if_detect{true};
 
-        static bool flag{false};
-
         if (is_detected) {
             if (thrower_watchdog.tick()) {
-                if (!flag) {
-                    msg.data = 1;
-                    flag     = !flag;
-                } else
-                    msg.data = 2;
+                msg.data    = 0;
                 is_detected = false;
             }
             thrower_detect_delay_watchdog.reset(2000); // ignore color time
-            thrower_pub_->publish(msg);
-            RCLCPP_INFO(get_logger(), "%ld", msg.data);
             return;
         }
 
@@ -129,11 +121,11 @@ private:
 
         if (if_detect) {
             if (isDetected("brown")) {
-                msg.data    = 0;
+                msg.data    = 1;
                 is_detected = true;
                 if_detect   = false;
             } else if (isDetected("purple")) {
-                msg.data    = 0;
+                msg.data    = 2;
                 is_detected = true;
                 if_detect   = false;
             } else {
@@ -141,7 +133,7 @@ private:
             }
         }
 
-        thrower_watchdog.reset(8880);                  // execution time
+        thrower_watchdog.reset(1000);                  // execution time
 
         thrower_pub_->publish(msg);
     }

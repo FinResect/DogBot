@@ -1,0 +1,9 @@
+rtsp_stream:
+  ros__parameters:
+    enabled: true
+    port: 8554
+    mount_point: "/cam"
+    bitrate: 2000
+    width: 640
+    height: 480
+    fps: 30

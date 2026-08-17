@@ -1,0 +1,43 @@
+color_detect_nonblue:
+  ros__parameters:
+    # 识别模式：0=禁用，1=HSV，2=RGB，3=LAB
+    mode: 3
+    min_area: 1125
+
+    # HSV 模式参数（mode=1 时生效），与 color_detect_nonblue.cpp 默认值一致
+    hsv_red_lower1: [0, 120, 70] #(0,184,108)
+    hsv_red_upper1: [10, 255, 255]
+    hsv_red_lower2: [170, 120, 70]
+    hsv_red_upper2: [179, 255, 255]
+    hsv_green_lower1: [40, 50, 50] #(47,118,107)
+    hsv_green_upper1: [80, 255, 255] 
+    hsv_brown_lower1: [10, 50, 30] #(1,255,30)
+    hsv_brown_upper1: [25, 255, 180]
+    hsv_purple_lower1: [130, 50, 50] #(176,65,123)
+    hsv_purple_upper1: [160, 255, 255]
+    hsv_orange_lower1: [5, 120, 70] #(12,127,160)
+    hsv_orange_upper1: [18, 255, 255]
+
+    # RGB 模式参数（mode=2 时生效），color 为 [R,G,B] 顺序
+    rgb_red_color: [109, 31, 31]
+    rgb_red_tolerance: 10
+    rgb_green_color: [80, 104, 56]
+    rgb_green_tolerance: 10
+    rgb_brown_color: [30, 1, 0]
+    rgb_brown_tolerance: 10
+    rgb_purple_color: [122, 90, 95]
+    rgb_purple_tolerance: 10
+    rgb_orange_color: [255, 165, 0]
+    rgb_orange_tolerance: 50
+
+    # LAB 模式参数（mode=3 时生效），color 为 [L,a,b] 顺序（OpenCV CV_8U，0-255）
+    lab_red_color: [63, 163, 148]
+    lab_red_tolerance: 20
+    lab_green_color: [107, 108, 153]
+    lab_green_tolerance: 20
+    lab_brown_color: [8, 139, 132]
+    lab_brown_tolerance: 20
+    lab_purple_color: [107, 141, 127]
+    lab_purple_tolerance: 20
+    lab_orange_color: [131, 142, 153]
+    lab_orange_tolerance: 20

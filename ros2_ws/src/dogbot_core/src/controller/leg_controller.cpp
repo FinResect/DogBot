@@ -6,6 +6,7 @@
 #include <Eigen/Dense>
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <cmath>
 #include <cstdint>
 #include <dogbot_msg/msg/gamepad_state.hpp>
@@ -92,6 +93,16 @@ public:
         pitch_sign_         = this->declare_parameter("pitch_sign", -1.0);
         stride_reduce_gain_ = this->declare_parameter("stride_reduce_gain", 0.5);
 
+        // yaw 航向纠偏参数（IMU yaw 为弧度制，参考航向 = 指令角速度纯积分）：
+        //  - yaw_stab_gain：P 增益 (1/s)，误差→纠正角速度的换算系数
+        //  - yaw_stab_max：纠正角速度上限 (rad/s)，稳态最大偏航 ≈ yaw_stab_max/gain
+        //  - yaw_stab_timeout：参考航向失同步超时 (s)，超过则重新吸附到实际 yaw
+        //  - yaw_sign：符号修正（±1），IMU 安装方向反时置 -1
+        yaw_stab_gain_    = this->declare_parameter("yaw_stab_gain", 2.0);
+        yaw_stab_max_     = this->declare_parameter("yaw_stab_max", 0.8);
+        yaw_stab_timeout_ = this->declare_parameter("yaw_stab_timeout", 0.2);
+        yaw_sign_         = this->declare_parameter("yaw_sign", 1.0);
+
         imu_pitch_sub_ = create_subscription<std_msgs::msg::Float64>(
             "/imu/pitch", 10, [this](const std_msgs::msg::Float64::SharedPtr msg) {
                 pitch_filt_ = pitch_ema_alpha_ * msg->data + (1.0 - pitch_ema_alpha_) * pitch_filt_;
@@ -173,8 +184,6 @@ private:
             gait_.set_gait_type(GaitType::TrotSpinMix);
             controller_mode_ = dogbot_msg::ControllerMode::Vision;
         }
-
-        // RCLCPP_INFO(get_logger(), "pitch:%lf", pitch_filt_);
 
         controller_update();
 
@@ -261,37 +270,64 @@ private:
         pub_thrower_right_->publish(right_msg);
     }
 
+    // IMU yaw → 机头航向纠偏：参考航向 yaw_ref_ 为指令角速度的纯积分，
+    // 实际 yaw 偏离参考时叠加比例纠正角速度把机体拉回。
+    // 纯比例、无死区：任意非零误差都产生纠正量（小误差小纠正、大误差饱和），
+    // 无 bang-bang 阈值跳变；纠正量限幅 yaw_stab_max_，
+    // 稳态最大偏航 ≈ yaw_stab_max_ / yaw_stab_gain_。
+    // 转弯指令使参考同步积分，因此只抵制非指令性漂移/打滑，不干扰正常转向；
+    // 失同步（长时间未调用/模式切换/断连）时参考重新吸附到实际 yaw，避免回拉冲击。
+    double yaw_stabilize(double omega_cmd) {
+        const auto now = std::chrono::steady_clock::now();
+        if (std::chrono::duration<double>(now - last_yaw_stab_time_).count() > yaw_stab_timeout_) {
+            yaw_ref_ = imu_yaw_;
+        }
+        last_yaw_stab_time_ = now;
+
+        yaw_ref_ += omega_cmd * dt_;
+        const double err = action::wrap_angle(imu_yaw_ - yaw_ref_);
+        const double correction =
+            std::clamp(-yaw_sign_ * yaw_stab_gain_ * err, -yaw_stab_max_, yaw_stab_max_);
+        return omega_cmd + correction;
+    }
+
     void controller_update() {
         switch (controller_mode_) {
         case dogbot_msg::ControllerMode::Auto: solver_update(feet_update(-0.2, -5.0)); break;
         case dogbot_msg::ControllerMode::Manual:
             solver_update(feet_update(
                 -0.4 * gamepad_state_.sticks.joystick_left.y,
-                10.0 * gamepad_state_.sticks.joystick_right.x));
+                yaw_stabilize(10.0 * gamepad_state_.sticks.joystick_right.x)));
             break;
         case dogbot_msg::ControllerMode::Vision: {
             bool stale   = (this->now() - last_vision_time_).seconds() > vision_timeout_;
             double vx    = stale ? 0.0 : -vision_twist_.linear.x;
-            double omega = stale ? 0.0 : vision_twist_.angular.z;
+            double omega = stale ? 0.0 : yaw_stabilize(vision_twist_.angular.z);
 
             if (turn_omega_ != 0.0) {
                 vx    = 0.0;
-                omega = turn_omega_;
+                omega = yaw_stabilize(turn_omega_);
             } else if (thrower_controller_ == 0) {
                 thrower_controller(false, false);
             } else if (thrower_controller_ == 1) {
                 thrower_controller(true, false);
+                vx    = 0.0;
+                omega = 0.0;
             } else if (thrower_controller_ == 2) {
                 thrower_controller(false, true);
+                vx    = 0.0;
+                omega = 0.0;
             } else if (place_controller_) {
                 action_.start_place(imu_yaw_);
                 action_.update(imu_yaw_, pitch_filt_, vx, omega);
+                yaw_stabilize(omega);
             } else if (climb_controller_) {
                 action_.start_climb(imu_yaw_);
                 action_.update(imu_yaw_, pitch_filt_, vx, omega);
             } else {
                 action_.abort();
                 thrower_controller(false, false);
+                yaw_stabilize(omega);
             }
 
             solver_update(feet_update(vx, omega));
@@ -353,6 +389,13 @@ private:
     double pitch_ema_alpha_    = 0.2;  // EMA 系数
     double pitch_sign_         = 1.0;  // pitch 符号修正（实机方向反时置 -1）
     double stride_reduce_gain_ = 0.5;  // 高度↑ 步幅↓ 折算系数
+
+    double yaw_ref_          = 0.0;    // 参考航向（指令角速度纯积分，弧度）
+    double yaw_stab_gain_    = 2.0;    // yaw 纠偏 P 增益 (1/s)
+    double yaw_stab_max_     = 0.8;    // 纠正角速度上限 (rad/s)
+    double yaw_stab_timeout_ = 0.2;    // 参考失同步重对齐超时 (s)
+    double yaw_sign_         = 1.0;    // yaw 符号修正（实机方向反时置 -1）
+    std::chrono::steady_clock::time_point last_yaw_stab_time_{}; // 上次纠偏调用时刻
 };
 
 } // namespace dogbot_core::controller

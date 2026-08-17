@@ -20,9 +20,38 @@ def generate_launch_description():
         'camera_params.yaml',
     )
 
-    with open(camera_params) as f:
-        _camera_cfg = yaml.safe_load(f)
-        _rtsp_cfg = _camera_cfg.get('rtsp_stream_node', {}).get('ros__parameters', {})
+    camera_top_params = os.path.join(
+        get_package_share_directory('dogbot_core'),
+        'config',
+        'camera_top_params.yaml',
+    )
+
+    rtsp_stream_params = os.path.join(
+        get_package_share_directory('dogbot_core'),
+        'config',
+        'rtsp_stream_params.yaml',
+    )
+
+    following_params = os.path.join(
+        get_package_share_directory('dogbot_core'),
+        'config',
+        'following_params.yaml',
+    )
+
+    color_detect_params = os.path.join(
+        get_package_share_directory('dogbot_core'),
+        'config',
+        'color_detect_params.yaml',
+    )
+
+    color_detect_nonblue_params = os.path.join(
+        get_package_share_directory('dogbot_core'),
+        'config',
+        'color_detect_nonblue_params.yaml',
+    )
+
+    with open(rtsp_stream_params) as f:
+        _rtsp_cfg = yaml.safe_load(f).get('rtsp_stream', {}).get('ros__parameters', {})
         rtsp_enabled = _rtsp_cfg.get('enabled', False)
 
     container = Node(
@@ -71,25 +100,25 @@ def generate_launch_description():
                 package='dogbot_core',
                 plugin='dogbot_core::camera::CameraTopNode',
                 name='camera_top',
-                parameters=[camera_params],
+                parameters=[camera_top_params],
             ),
             ComposableNode(
                 package='dogbot_core', 
                 plugin='dogbot_core::vision::FollowingNode',
                 name='following', 
-                parameters=[camera_params],
+                parameters=[following_params],
             ),
             ComposableNode(
                 package='dogbot_core',
                 plugin='dogbot_core::vision::ColorDetectNode',
                 name='color_detect',
-                parameters=[camera_params],
+                parameters=[color_detect_params],
             ),
             ComposableNode(
                 package='dogbot_core',
                 plugin='dogbot_core::vision::ColorDetectNonblueNode',
                 name='color_detect_nonblue',
-                parameters=[camera_params],
+                parameters=[color_detect_nonblue_params],
             ),
             ComposableNode(
                 package='dogbot_core',
@@ -105,12 +134,12 @@ def generate_launch_description():
         load_rtsp = LoadComposableNodes(
             target_container='vision_container',
             composable_node_descriptions=[
-                ComposableNode(
-                    package='dogbot_core',
-                    plugin='dogbot_core::camera::RtspStreamNode',
-                    name='rtsp_stream',
-                    parameters=[camera_params],
-                ),
+            ComposableNode(
+                package='dogbot_core',
+                plugin='dogbot_core::camera::RtspStreamNode',
+                name='rtsp_stream',
+                parameters=[rtsp_stream_params],
+            ),
             ],
         )
         actions.append(load_rtsp)

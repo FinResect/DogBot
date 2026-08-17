@@ -35,7 +35,7 @@ public:
         fps_         = declare_parameter("fps", 30);
 
         sub_ = create_subscription<sensor_msgs::msg::Image>(
-            "/vision/following/image", 10,
+            "/vision/color_detect_nonblue/image", 10,
             std::bind(&RtspStreamNode::image_callback, this, std::placeholders::_1));
 
         gst_init(nullptr, nullptr);
