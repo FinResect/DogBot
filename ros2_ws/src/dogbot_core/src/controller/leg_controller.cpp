@@ -85,12 +85,15 @@ public:
         //    实机若发现该加高的腿反了则置 -1
         //  - stride_reduce_gain：高度↑ 步幅↓ 折算系数，
         //    stride_scale = clamp(1 − gain·ΔH/kDefaultStepHeight, 0.5, 1.0)
-        pitch_lift_gain_ = this->declare_parameter("pitch_lift_gain", 0.0);
-        max_extra_lift_  = this->declare_parameter("max_extra_lift", 0.02);
+        pitch_lift_gain_ = this->declare_parameter(
+            "pitch_lift_gain",
+            0.0); // 用来给抬腿高度加补偿，理论上会让走动的时候抖动更小，实际上也确实是，比例参考上面注释，这些参数可以放在yaml里，我现在没有加
+        max_extra_lift_ = this->declare_parameter("max_extra_lift", 0.02);
         pitch_deadband_ =
             this->declare_parameter("pitch_deadband_deg", 2.0) * std::numbers::pi / 180.0;
-        pitch_ema_alpha_    = this->declare_parameter("pitch_ema_alpha", 0.2);
-        pitch_sign_         = this->declare_parameter("pitch_sign", -1.0);
+        pitch_ema_alpha_ = this->declare_parameter("pitch_ema_alpha", 0.2);
+        pitch_sign_      = this->declare_parameter(
+            "pitch_sign", -1.0); // 正负决定是前腿抬高后腿压低还是前腿压低后腿抬高
         stride_reduce_gain_ = this->declare_parameter("stride_reduce_gain", 0.5);
 
         // yaw 航向纠偏参数（IMU yaw 为弧度制，参考航向 = 指令角速度纯积分）：
@@ -98,7 +101,7 @@ public:
         //  - yaw_stab_max：纠正角速度上限 (rad/s)，稳态最大偏航 ≈ yaw_stab_max/gain
         //  - yaw_stab_timeout：参考航向失同步超时 (s)，超过则重新吸附到实际 yaw
         //  - yaw_sign：符号修正（±1），IMU 安装方向反时置 -1
-        yaw_stab_gain_    = this->declare_parameter("yaw_stab_gain", 2.0);
+        yaw_stab_gain_ = this->declare_parameter("yaw_stab_gain", 2.0); // 下面说的航向纠偏的参数
         yaw_stab_max_     = this->declare_parameter("yaw_stab_max", 0.8);
         yaw_stab_timeout_ = this->declare_parameter("yaw_stab_timeout", 0.2);
         yaw_sign_         = this->declare_parameter("yaw_sign", 1.0);
@@ -306,31 +309,60 @@ private:
 
             if (turn_omega_ != 0.0) {
                 vx    = 0.0;
-                omega = yaw_stabilize(turn_omega_);
-            } else if (thrower_controller_ == 0) {
-                thrower_controller(false, false);
+                omega = turn_omega_;
+
+                if (last_turn_omega_ == 0.0) {
+                    RCLCPP_INFO(get_logger(), "enter mode: turn , omega = %lf", omega);
+                }
             } else if (thrower_controller_ == 1) {
                 thrower_controller(true, false);
                 vx    = 0.0;
                 omega = 0.0;
+                // 左投掷
+
+                if (last_thrower_controller_ != 1) {
+                    RCLCPP_INFO(get_logger(), "enter mode: thrower , throw left");
+                }
             } else if (thrower_controller_ == 2) {
                 thrower_controller(false, true);
                 vx    = 0.0;
                 omega = 0.0;
+                // 右投掷
+
+                if (last_thrower_controller_ != 2) {
+                    RCLCPP_INFO(get_logger(), "enter mode: thrower , throw right");
+                }
             } else if (place_controller_) {
                 action_.start_place(imu_yaw_);
                 action_.update(imu_yaw_, pitch_filt_, vx, omega);
-                yaw_stabilize(omega);
+                // 走完一圈后进集散中心的模式，ctrl加左键点update可以进去那个文件，找到对应的参数然后去调
+
+                if (!last_place_controller_) {
+                    RCLCPP_INFO(get_logger(), "enter mode: place");
+                }
             } else if (climb_controller_) {
                 action_.start_climb(imu_yaw_);
                 action_.update(imu_yaw_, pitch_filt_, vx, omega);
+                // 上台阶模式，ctrl加左键点update可以进去那个文件，找到对应的参数然后去调
+
+                if (!last_climb_controller_) {
+                    RCLCPP_INFO(get_logger(), "enter mode: climb");
+                }
             } else {
                 action_.abort();
                 thrower_controller(false, false);
-                yaw_stabilize(omega);
+                // yaw_stabilize(omega);
+                // ⬆️被注释掉的这一句是用来避免行走时转向过大的，如果有转向过大可以试试这个，不过参数需要调
+                // 注意不应该和那些已经用过imu修正的模式叠加
             }
 
             solver_update(feet_update(vx, omega));
+
+            last_turn_omega_         = turn_omega_;
+            last_thrower_controller_ = thrower_controller_;
+            last_place_controller_   = place_controller_;
+            last_climb_controller_   = climb_controller_;
+
             break;
         }
         default: reset_all_controller(); break;
@@ -364,6 +396,11 @@ private:
     int64_t thrower_controller_ = 0;
     bool place_controller_      = false;
     bool climb_controller_      = false;
+
+    double last_turn_omega_          = 0.0;
+    int64_t last_thrower_controller_ = 0;
+    bool last_place_controller_      = false;
+    bool last_climb_controller_      = false;
 
     rclcpp::Subscription<dogbot_msg::msg::GamepadState>::SharedPtr gamepad_state_sub_;
     rclcpp::Subscription<std_msgs::msg::Float64>::SharedPtr theta_sub_;
