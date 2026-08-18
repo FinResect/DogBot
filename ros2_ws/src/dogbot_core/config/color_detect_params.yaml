@@ -2,16 +2,16 @@ color_detect:
   ros__parameters:
     # 识别模式：0=禁用，1=HSV，2=RGB，3=LAB
     mode: 3
-    min_area: 500
+    min_area: 3000
 
     # HSV 模式参数（mode=1 时生效），与 color_detect.cpp 默认值一致
-    hsv_blue_lower1: [100, 120, 70] #(128,150,100)
+    hsv_blue_lower1: [100, 120, 70] #(126,114,137)
     hsv_blue_upper1: [130, 255, 255]
 
     # RGB 模式参数（mode=2 时生效），color 为 [R,G,B] 顺序
-    rgb_blue_color: [60, 40, 100]
+    rgb_blue_color: [91, 78, 130]
     rgb_blue_tolerance: 10
 
     # LAB 模式参数（mode=3 时生效），color 为 [L,a,b] 顺序（OpenCV CV_8U，0-255）
-    lab_blue_color: [55, 150, 92]
+    lab_blue_color: [92, 142, 100]
     lab_blue_tolerance: 20

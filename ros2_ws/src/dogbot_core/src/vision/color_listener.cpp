@@ -67,7 +67,7 @@ private:
         static bool is_detected{false};
 
         if (isDetected("green")) {
-            turn_watchdog.reset(200);                  // time from 'color disappear' to 'turn'
+            turn_watchdog.reset(2000);                 // time from 'color disappear' to 'turn'
             is_detected = true;
         }
 
@@ -78,13 +78,15 @@ private:
             if (turn_watchdog.tick()) {
                 if (is_first) {
                     msg.data = -kTurnOmega;
+                    is_first = !is_first;
                 } else {
                     msg.data = kTurnOmega;
+                    is_first = !is_first;
                 }
 
                 turn_omega_pub_->publish(msg);
                 is_omega_pub = true;
-                turn_omega_delay_watchdog.reset(200);  // turn delay time
+                turn_omega_delay_watchdog.reset(2000); // turn delay time
                 return;
             }
             if (is_omega_pub) {
@@ -150,12 +152,13 @@ private:
 
                 is_detected = false;
             }
+
             place_detect_delay_watchdog.reset(2000);   // ignore color time
             return;
         }
 
         if (place_detect_delay_watchdog.tick()) {
-            if_detect = false;
+            if_detect = true;
             msg.data  = false;
         }
 
@@ -166,11 +169,11 @@ private:
                 is_detected = true;
                 if_detect   = false;
             } else {
-                msg.data = 0;
+                msg.data = false;
             }
         }
 
-        place_watchdog.reset(200);                     // execution time
+        place_watchdog.reset(60000);                   // execution time
 
         place_pub_->publish(msg);
     }
@@ -193,6 +196,7 @@ private:
 
         if (climb_detect_delay_watchdog.tick()) {
             if_detect = true;
+            msg.data  = false;
         }
 
         if (if_detect) {
@@ -202,7 +206,7 @@ private:
                 is_detected = true;
                 if_detect   = false;
             } else {
-                msg.data = 0;
+                msg.data = false;
             }
         }
 

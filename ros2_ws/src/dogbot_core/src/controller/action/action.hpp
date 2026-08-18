@@ -35,13 +35,13 @@ class Place {
 public:
     struct Params {
         double turn_angle_deg = 45.0; // 右/左转角度（度）
-        double distance_m     = 0.5;  // 直行距离 (m)
-        double vx             = 0.1;  // 直行线速度 (m/s)
+        double distance_m     = 14.0; // 直行距离 (m)
+        double vx             = 3.5;  // 直行线速度 (m/s)
         double omega_max      = 0.8;  // 转弯角速度上限 (rad/s)
         double turn_gain      = 3.0;  // 转角 P 控制增益 (1/s)
         double angle_tol_deg  = 2.0;  // 转角到位死区（度）
         double min_turn_time  = 0.5;  // 转弯阶段最短持续时间 (s)
-        double turn_sign      = -1.0; // 右转方向符号（±1，实机反向时置反）
+        double turn_sign      = 1.0;  // 右转方向符号（±1，实机反向时置反）
     };
 
     // 开始动作：记录初始角，从右转阶段开始执行。仅首个 start 生效，
