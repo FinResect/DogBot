@@ -48,7 +48,7 @@ public:
         }
 
         hip_[0].init(this, "left_front_hip", 5, 0.0, 270.0);
-        hip_[0].setPWMOffset(-25);
+        hip_[0].setPWMOffset(20);
 
         hip_[1].init(this, "left_back_hip", 7, 0.0, 270.0);
         hip_[1].setPWMOffset(0); // 舵盘不同导致需要加偏置

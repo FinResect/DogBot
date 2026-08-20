@@ -59,7 +59,7 @@ def generate_launch_description():
         executable='component_container',
         name='dogbot_container',
         output='screen',
-        # prefix='taskset -c 0,1',
+        prefix='taskset -c 0,1',
     )
 
     vision_container = Node(
@@ -67,7 +67,7 @@ def generate_launch_description():
         executable='component_container_mt',
         name='vision_container',
         output='screen',
-        # prefix='taskset -c 2,3',
+        prefix='taskset -c 2,3',
     )
 
     load_dogbot = LoadComposableNodes(

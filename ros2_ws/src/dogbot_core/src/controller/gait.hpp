@@ -81,9 +81,13 @@ public:
         stride_scale_ = std::clamp(stride_scale, 0.0, 1.0);
     }
 
+    // 设置步态周期 (s)，仅 trot / spin / trot_spin_mix 生效（walk 固定 1.0s）。
+    // 下限 0.1s：防止 step_cycle 中 t_/period 除零；上限 5.0s 防误设。
+    // 运行中修改无需复位：摆动相为增量积分（y_start_），无足端跳变。
+    void set_period(double period) { period_ = std::clamp(period, 0.1, 5.0); }
+
 private:
     static constexpr double kStanceZ = 0.14; // 站立时足端离髋竖直距离 (m)
-    static constexpr double kPeriod  = 1.2;  // 步态周期 (s)
     // 足端最大速度 (m/s)：由舵机最大转速 187.5°/s (0.32s/60°) 反推——
     // 髋到足距离取保守值 r=0.114，留 ~14% 余量。支撑相足端速度 = 指令速度，
     // 因此指令在速度层钳制；摆动相目标幅值另行由 kMaxStride 限制。
@@ -94,7 +98,6 @@ private:
     // 速度再次超限。
     static constexpr double kMaxStride  = 0.032;
     static constexpr double kSwingRatio = 0.5; // 摆动相占周期比例
-    static constexpr double kStrideTime = kPeriod * 0.25;
 
     // 对角配对：LF+RB 同相、LB+RF 同相（索引见类注释）。
     static constexpr std::array<double, 4> kTrotPhase{0.0, 0.5, 0.0, 0.5};
@@ -188,14 +191,15 @@ private:
     }
 
     // trot / spin / trot_spin_mix：同一速度级增量积分，仅速度项开关不同。
+    // 单腿行程时长 = 周期 × 0.25（随 set_period 联动，保证速度上限约束自动跟随）。
     void trot_update(double dt) {
-        step_cycle(dt, kPeriod, kTrotPhase, kSwingRatio, kStrideTime, kMaxStride, true, false);
+        step_cycle(dt, period_, kTrotPhase, kSwingRatio, period_ * 0.25, kMaxStride, true, false);
     }
     void spin_update(double dt) {
-        step_cycle(dt, kPeriod, kTrotPhase, kSwingRatio, kStrideTime, kMaxStride, false, true);
+        step_cycle(dt, period_, kTrotPhase, kSwingRatio, period_ * 0.25, kMaxStride, false, true);
     }
     void trot_spin_mix_update(double dt) {
-        step_cycle(dt, kPeriod, kTrotPhase, kSwingRatio, kStrideTime, kMaxStride, true, true);
+        step_cycle(dt, period_, kTrotPhase, kSwingRatio, period_ * 0.25, kMaxStride, true, true);
     }
 
     // walk：4 拍爬行步态，仅 vx 生效（不支持转弯）。
@@ -321,6 +325,7 @@ private:
     GaitType type_ = GaitType::Stand;
     double vx_     = 0.0;
     double omega_  = 0.0;
+    double period_ = 0.9; // 步态周期 (s)，仅 trot / spin / trot_spin_mix 使用
 
     double t_ = 0.0;
 

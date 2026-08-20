@@ -87,7 +87,7 @@ public:
         //    stride_scale = clamp(1 − gain·ΔH/kDefaultStepHeight, 0.5, 1.0)
         pitch_lift_gain_ = this->declare_parameter(
             "pitch_lift_gain",
-            0.0); // 用来给抬腿高度加补偿，理论上会让走动的时候抖动更小，实际上也确实是，比例参考上面注释，这些参数可以放在yaml里，我现在没有加
+            0.05); // 用来给抬腿高度加补偿，理论上会让走动的时候抖动更小，实际上也确实是，比例参考上面注释，这些参数可以放在yaml里，我现在没有加
         max_extra_lift_ = this->declare_parameter("max_extra_lift", 0.02);
         pitch_deadband_ =
             this->declare_parameter("pitch_deadband_deg", 2.0) * std::numbers::pi / 180.0;
@@ -300,16 +300,20 @@ private:
         case dogbot_msg::ControllerMode::Manual:
             solver_update(feet_update(
                 -0.4 * gamepad_state_.sticks.joystick_left.y,
-                yaw_stabilize(10.0 * gamepad_state_.sticks.joystick_right.x)));
+                (10.0 * gamepad_state_.sticks.joystick_right.x)));
             break;
         case dogbot_msg::ControllerMode::Vision: {
             bool stale   = (this->now() - last_vision_time_).seconds() > vision_timeout_;
             double vx    = stale ? 0.0 : -vision_twist_.linear.x;
-            double omega = stale ? 0.0 : yaw_stabilize(vision_twist_.angular.z);
+            double omega = stale ? 0.0 : (vision_twist_.angular.z);
+
+            gait_.set_period(0.6);
 
             if (turn_omega_ != 0.0) {
                 vx    = 0.0;
                 omega = turn_omega_;
+
+                gait_.set_period(0.6);
 
                 if (last_turn_omega_ == 0.0) {
                     RCLCPP_INFO(get_logger(), "enter mode: turn , omega = %lf", omega);
@@ -320,6 +324,8 @@ private:
                 omega = 0.0;
                 // 左投掷
 
+                gait_.set_period(0.6);
+
                 if (last_thrower_controller_ != 1) {
                     RCLCPP_INFO(get_logger(), "enter mode: thrower , throw left");
                 }
@@ -329,6 +335,8 @@ private:
                 omega = 0.0;
                 // 右投掷
 
+                gait_.set_period(0.6);
+
                 if (last_thrower_controller_ != 2) {
                     RCLCPP_INFO(get_logger(), "enter mode: thrower , throw right");
                 }
@@ -336,6 +344,8 @@ private:
                 action_.start_place(imu_yaw_);
                 action_.update(imu_yaw_, pitch_filt_, vx, omega);
                 // 走完一圈后进集散中心的模式，ctrl加左键点update可以进去那个文件，找到对应的参数然后去调
+
+                gait_.set_period(0.6);
 
                 if (!last_place_controller_) {
                     RCLCPP_INFO(get_logger(), "enter mode: place");
@@ -345,12 +355,15 @@ private:
                 action_.update(imu_yaw_, pitch_filt_, vx, omega);
                 // 上台阶模式，ctrl加左键点update可以进去那个文件，找到对应的参数然后去调
 
+                gait_.set_period(0.9);
+
                 if (!last_climb_controller_) {
                     RCLCPP_INFO(get_logger(), "enter mode: climb");
                 }
             } else {
                 action_.abort();
                 thrower_controller(false, false);
+                gait_.set_period(0.6);
                 // yaw_stabilize(omega);
                 // ⬆️被注释掉的这一句是用来避免行走时转向过大的，如果有转向过大可以试试这个，不过参数需要调
                 // 注意不应该和那些已经用过imu修正的模式叠加

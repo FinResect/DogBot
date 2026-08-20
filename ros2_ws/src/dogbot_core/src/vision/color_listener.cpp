@@ -173,7 +173,7 @@ private:
             }
         }
 
-        place_watchdog.reset(60000);                   // execution time
+        place_watchdog.reset(32000);                   // execution time
 
         place_pub_->publish(msg);
     }
@@ -210,7 +210,7 @@ private:
             }
         }
 
-        climb_watchdog.reset(200);                     // execution time
+        climb_watchdog.reset(25000);                   // execution time
 
         climb_pub_->publish(msg);
     }
