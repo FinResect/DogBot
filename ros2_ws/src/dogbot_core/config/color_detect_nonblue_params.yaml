@@ -33,9 +33,9 @@ color_detect_nonblue:
     # LAB 模式参数（mode=3 时生效），color 为 [L,a,b] 顺序（OpenCV CV_8U，0-255）
     lab_red_color: [118, 183, 156]
     lab_red_tolerance: 15
-    lab_green_color: [236, 89, 177]
+    lab_green_color: [242, 96, 177]
     lab_green_tolerance: 15
-    lab_brown_color: [54, 153, 143]
+    lab_brown_color: [180, 161, 140]
     lab_brown_tolerance: 15
     lab_purple_color: [82, 155, 99]
     lab_purple_tolerance: 10

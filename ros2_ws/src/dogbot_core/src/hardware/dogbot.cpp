@@ -32,7 +32,7 @@ public:
         thrower_right_.set_angle(155, 80);
 
         knee_[0].init(this, "left_front_knee", 4, 0.0, 270.0);
-        knee_[0].setPWMOffset(0);
+        knee_[0].setPWMOffset(-65);
 
         knee_[1].init(this, "left_back_knee", 6, 0.0, 270.0);
         knee_[1].setPWMOffset(0);
@@ -41,14 +41,14 @@ public:
         knee_[2].setPWMOffset(0);
 
         knee_[3].init(this, "right_front_knee", 2, 0.0, 270.0);
-        knee_[3].setPWMOffset(0);
+        knee_[3].setPWMOffset(-20);
 
         for (uint8_t i = 0; i < 4; i++) {
             knee_[i].setPWMLimits(1100, 1600);
         }
 
         hip_[0].init(this, "left_front_hip", 5, 0.0, 270.0);
-        hip_[0].setPWMOffset(20);
+        hip_[0].setPWMOffset(-30);
 
         hip_[1].init(this, "left_back_hip", 7, 0.0, 270.0);
         hip_[1].setPWMOffset(0); // 舵盘不同导致需要加偏置
@@ -57,7 +57,7 @@ public:
         hip_[2].setPWMOffset(0);
 
         hip_[3].init(this, "right_front_hip", 3, 0.0, 270.0);
-        hip_[3].setPWMOffset(-150);
+        hip_[3].setPWMOffset(-200);
         for (uint8_t i = 0; i < 4; i++) {
             hip_[i].setPWMLimits(830, 2200);
         }

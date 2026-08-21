@@ -6,11 +6,11 @@ following:
     width_continuity_weight: 0.1
     gaussian_kernel_size: 5
     morph_kernel_size: 3
-    roi_bottom_ratio: 0.92
+    roi_bottom_ratio: 0.72
     max_gap_rows: 5
     center_smooth_window: 9
     lookahead_ratio: 0.1
     lookahead_band_ratio: 0.12
     ema_alpha: 0.25
-    vx_max: 0.20
-    kp_angular: 6.0
+    vx_max: 0.2
+    kp_angular: 10.0

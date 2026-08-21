@@ -13,5 +13,5 @@ color_detect:
     rgb_blue_tolerance: 10
 
     # LAB 模式参数（mode=3 时生效），color 为 [L,a,b] 顺序（OpenCV CV_8U，0-255）
-    lab_blue_color: [92, 142, 100]
-    lab_blue_tolerance: 20
+    lab_blue_color: [92, 0, 00] # 92 142 100
+    lab_blue_tolerance: 10

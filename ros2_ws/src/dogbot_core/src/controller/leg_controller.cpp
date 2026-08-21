@@ -181,8 +181,7 @@ private:
             gait_.set_gait_type(GaitType::Spin);
             controller_mode_ = dogbot_msg::ControllerMode::Auto;
         } else if (button_up && !last_button_up) {
-            gait_.set_gait_type(GaitType::Climb);
-            controller_mode_ = dogbot_msg::ControllerMode::Auto;
+            controll_flag = !controll_flag;
         } else if (button_l1 && !last_button_l1) {
             gait_.set_gait_type(GaitType::TrotSpinMix);
             controller_mode_ = dogbot_msg::ControllerMode::Vision;
@@ -296,24 +295,28 @@ private:
 
     void controller_update() {
         switch (controller_mode_) {
-        case dogbot_msg::ControllerMode::Auto: solver_update(feet_update(-0.2, -5.0)); break;
+        case dogbot_msg::ControllerMode::Auto:
+            gait_.set_period(0.6);
+            solver_update(feet_update(-0.2, -5.0));
+            break;
         case dogbot_msg::ControllerMode::Manual:
+            gait_.set_period(0.6);
             solver_update(feet_update(
                 -0.4 * gamepad_state_.sticks.joystick_left.y,
                 (10.0 * gamepad_state_.sticks.joystick_right.x)));
             break;
         case dogbot_msg::ControllerMode::Vision: {
             bool stale   = (this->now() - last_vision_time_).seconds() > vision_timeout_;
-            double vx    = stale ? 0.0 : -vision_twist_.linear.x;
-            double omega = stale ? 0.0 : (vision_twist_.angular.z);
+            double vx    = !vision_twist_.linear.x ? last_vx : -vision_twist_.linear.x;
+            double omega = !vision_twist_.angular.z ? last_omega : vision_twist_.angular.z;
 
-            gait_.set_period(0.6);
+            gait_.set_period(0.9);
 
             if (turn_omega_ != 0.0) {
                 vx    = 0.0;
                 omega = turn_omega_;
 
-                gait_.set_period(0.6);
+                gait_.set_period(0.9);
 
                 if (last_turn_omega_ == 0.0) {
                     RCLCPP_INFO(get_logger(), "enter mode: turn , omega = %lf", omega);
@@ -324,7 +327,7 @@ private:
                 omega = 0.0;
                 // 左投掷
 
-                gait_.set_period(0.6);
+                gait_.set_period(0.9);
 
                 if (last_thrower_controller_ != 1) {
                     RCLCPP_INFO(get_logger(), "enter mode: thrower , throw left");
@@ -335,7 +338,7 @@ private:
                 omega = 0.0;
                 // 右投掷
 
-                gait_.set_period(0.6);
+                gait_.set_period(0.9);
 
                 if (last_thrower_controller_ != 2) {
                     RCLCPP_INFO(get_logger(), "enter mode: thrower , throw right");
@@ -345,12 +348,12 @@ private:
                 action_.update(imu_yaw_, pitch_filt_, vx, omega);
                 // 走完一圈后进集散中心的模式，ctrl加左键点update可以进去那个文件，找到对应的参数然后去调
 
-                gait_.set_period(0.6);
+                gait_.set_period(0.9);
 
                 if (!last_place_controller_) {
                     RCLCPP_INFO(get_logger(), "enter mode: place");
                 }
-            } else if (climb_controller_) {
+            } else if (climb_controller_ || controll_flag) {
                 action_.start_climb(imu_yaw_);
                 action_.update(imu_yaw_, pitch_filt_, vx, omega);
                 // 上台阶模式，ctrl加左键点update可以进去那个文件，找到对应的参数然后去调
@@ -358,18 +361,22 @@ private:
                 gait_.set_period(0.9);
 
                 if (!last_climb_controller_) {
-                    RCLCPP_INFO(get_logger(), "enter mode: climb");
+                    // RCLCPP_INFO(get_logger(), "enter mode: climb");
                 }
             } else {
                 action_.abort();
                 thrower_controller(false, false);
-                gait_.set_period(0.6);
+                gait_.set_period(0.9);
                 // yaw_stabilize(omega);
                 // ⬆️被注释掉的这一句是用来避免行走时转向过大的，如果有转向过大可以试试这个，不过参数需要调
                 // 注意不应该和那些已经用过imu修正的模式叠加
             }
 
+            // RCLCPP_INFO(get_logger(), "vx:%lf\t,omega:%lf", vx, omega);
             solver_update(feet_update(vx, omega));
+
+            last_vx    = vx;
+            last_omega = omega;
 
             last_turn_omega_         = turn_omega_;
             last_thrower_controller_ = thrower_controller_;
@@ -402,6 +409,8 @@ private:
     double theta_               = 0.0;
     static constexpr double dt_ = 0.002;
 
+    bool controll_flag{false};
+
     geometry_msgs::msg::Twist vision_twist_;
     rclcpp::Time last_vision_time_{0, 0, RCL_ROS_TIME};
     double vision_timeout_      = 0.5;
@@ -414,6 +423,9 @@ private:
     int64_t last_thrower_controller_ = 0;
     bool last_place_controller_      = false;
     bool last_climb_controller_      = false;
+
+    double last_vx    = 0.0;
+    double last_omega = 0.0;
 
     rclcpp::Subscription<dogbot_msg::msg::GamepadState>::SharedPtr gamepad_state_sub_;
     rclcpp::Subscription<std_msgs::msg::Float64>::SharedPtr theta_sub_;
