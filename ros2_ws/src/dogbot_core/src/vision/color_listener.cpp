@@ -46,6 +46,9 @@ public:
         place_detect_delay_watchdog.reset(0);
         climb_watchdog.reset(0);
         climb_detect_delay_watchdog.reset(0);
+
+        red_to_green_watchdog.reset(400);
+        test_watchdog.reset(500);
     }
 
     bool isDetected(const std::string& name) const {
@@ -109,7 +112,7 @@ private:
 
         if (is_detected) {
             if (thrower_watchdog.tick()) {
-                msg.data    = 0;
+                msg.data    = false;
                 is_detected = false;
             }
             thrower_detect_delay_watchdog.reset(2000); // ignore color time
@@ -118,14 +121,24 @@ private:
 
         if (thrower_detect_delay_watchdog.tick()) {
             if_detect = true;
-            msg.data  = 0;
+            msg.data  = false;
+            red_to_green_watchdog.reset(200);
+            test_watchdog.reset(300);
         }
 
         if (if_detect) {
             if (isDetected("brown")) {
-                msg.data    = 1;
-                is_detected = true;
-                if_detect   = false;
+                if (red_to_green_watchdog.tick()) {
+                    if (isDetected("green")) {
+                        test_watchdog.reset(500);
+                    }
+                    red_to_green_watchdog.reset(400);
+                }
+                if (test_watchdog.tick()) {
+                    msg.data    = 1;
+                    is_detected = true;
+                    if_detect   = false;
+                }
             } else if (isDetected("purple")) {
                 msg.data    = 2;
                 is_detected = true;
@@ -210,7 +223,7 @@ private:
             }
         }
 
-        climb_watchdog.reset(25000);                   // execution time
+        climb_watchdog.reset(0);                       // execution time
 
         climb_pub_->publish(msg);
     }
@@ -223,6 +236,10 @@ private:
     controller::tick::TickTimer turn_omega_delay_watchdog;
     controller::tick::TickTimer thrower_watchdog;
     controller::tick::TickTimer thrower_detect_delay_watchdog;
+
+    controller::tick::TickTimer red_to_green_watchdog;
+    controller::tick::TickTimer test_watchdog;
+
     controller::tick::TickTimer place_watchdog;
     controller::tick::TickTimer place_detect_delay_watchdog;
     controller::tick::TickTimer climb_watchdog;

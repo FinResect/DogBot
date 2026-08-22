@@ -67,7 +67,7 @@ public:
         started_      = true;
         params_       = params;
         initial_yaw_  = initial_yaw;
-        phase_        = Phase::TurnRight;
+        phase_        = Phase::MoveForward_delay;
         step_         = Step::None;
         turn_latched_ = false;
     }
@@ -123,6 +123,16 @@ public:
         }
         // 固定序列模式：TurnRight → MoveForward → TurnBack → TurnLeft。
         switch (phase_) {
+        case Phase::MoveForward_delay:
+            if (params_.vx >= 0.0 || params_.straight_time_s <= 0.0) {
+                phase_ = Phase::TurnRight;
+                break;
+            }
+            straight_step(Direction::Forward, 0.4, 2.0);
+            if (straight_control(vx)) {
+                phase_ = Phase::TurnRight;
+            }
+            break;
         case Phase::TurnRight:
             turn_step(Direction::Right, 45.0, params_.omega_max);
             if (turn_control(yaw, omega)) {
@@ -141,7 +151,8 @@ public:
             }
             break;
         case Phase::TurnBack:
-            begin_turn_abs(initial_yaw_, params_.omega_max);
+            // begin_turn_abs(initial_yaw_, params_.omega_max);
+            turn_step(Direction::Left, 45.0, params_.omega_max);
             if (turn_control(yaw, omega)) {
                 phase_ = Phase::MoveForward_second;
             }
@@ -170,7 +181,15 @@ public:
 
 private:
     enum class Step { None, Turn, Straight };
-    enum class Phase { TurnRight, MoveForward_first, TurnBack, MoveForward_second, TurnLeft, Done };
+    enum class Phase {
+        MoveForward_delay,
+        TurnRight,
+        MoveForward_first,
+        TurnBack,
+        MoveForward_second,
+        TurnLeft,
+        Done
+    };
 
     // 绝对目标转弯（序列 TurnBack 用）：目标角与起始 yaw 无关，修正直行期间的 yaw 漂移。
     void begin_turn_abs(double target_rad, double omega_lim) {
@@ -265,14 +284,14 @@ private:
 class Climb {
 public:
     struct Params {
-        double vx             = -0.3; // 恒定线速度 (m/s)
-        double omega_max      = 0.5;  // yaw 保持角速度上限 (rad/s)
-        double yaw_gain       = 2.0;  // yaw 保持 P 控制增益 (1/s)
-        double angle_tol_deg  = 2.0;  // yaw 死区（度）
-        double pitch_rise_deg = 8.0;  // pitch 超过该值判定上坡 (度)
-        double pitch_fall_deg = 0.0;  // 上坡后 pitch 回落低于该值判定完成 (度)
-        double pitch_sign     = 1.0;  // 上坡方向符号（±1，实机反向时置反）
-        double min_run_time   = 1.0;  // 最短运行时间 (s)，防抖动误判完成
+        double vx             = -0.3;   // 恒定线速度 (m/s)
+        double omega_max      = 1000.0; // yaw 保持角速度上限 (rad/s)
+        double yaw_gain       = 6.0;    // yaw 保持 P 控制增益 (1/s)
+        double angle_tol_deg  = 0.0;    // yaw 死区（度）
+        double pitch_rise_deg = 15.0;   // pitch 超过该值判定上坡 (度)
+        double pitch_fall_deg = 0.0;    // 上坡后 pitch 回落低于该值判定完成 (度)
+        double pitch_sign     = 1.0;    // 上坡方向符号（±1，实机反向时置反）
+        double min_run_time   = 3.0;    // 最短运行时间 (s)，防抖动误判完成
     };
 
     // 开始动作：记录 yaw 保持目标。仅首个 start 生效，abort() 复位后才可再次 start。
@@ -299,8 +318,7 @@ public:
     // 每帧调用：输入当前 IMU yaw 与 pitch（弧度制），回传线速度/角速度；
     // 返回 true 表示爬坡已完成（完成后输出零速度）。
     bool update(double yaw, double pitch, double& vx, double& omega) {
-        vx    = 0.0;
-        omega = 0.0;
+        vx = 0.0;
         if (finished_) {
             return true;
         }
@@ -308,9 +326,10 @@ public:
         // 恒定线速度 + yaw 闭环保持（比例控制，限幅）。
         vx               = params_.vx;
         const double err = wrap_angle(yaw_target_ - yaw);
-        omega            = std::abs(err) < angle_tol()
-                             ? 0.0
-                             : std::clamp(err * params_.yaw_gain, -params_.omega_max, params_.omega_max);
+        omega += std::abs(err) < angle_tol()
+                   ? 0.0
+                   : std::clamp(err * params_.yaw_gain, -params_.omega_max, params_.omega_max);
+        omega = std::clamp(omega, -params_.omega_max, params_.omega_max);
 
         // pitch 完成判定：先超过上坡阈值（armed），再回落到完成阈值以下且
         // 运行时间 ≥ min_run_time 视为爬坡完成。

@@ -1,6 +1,7 @@
 #include "action/action.hpp"
 #include "controller/gait.hpp"
 #include "controller/leg_solver.hpp"
+#include "controller/tick/tick_timer.hpp"
 #include "controller_mode.hpp"
 
 #include <Eigen/Dense>
@@ -199,6 +200,8 @@ private:
         last_button_start = button_start;
         last_button_mode  = button_mode;
         last_button_l1    = button_l1;
+
+        last_controll_flag = controll_flag;
     }
 
     void reset_all_controller() {
@@ -310,13 +313,12 @@ private:
             double vx    = !vision_twist_.linear.x ? last_vx : -vision_twist_.linear.x;
             double omega = !vision_twist_.angular.z ? last_omega : vision_twist_.angular.z;
 
-            gait_.set_period(0.9);
+            pitch_lift_gain_ = 0.05;
+            gait_.set_period(0.7);
 
             if (turn_omega_ != 0.0) {
                 vx    = 0.0;
                 omega = turn_omega_;
-
-                gait_.set_period(0.9);
 
                 if (last_turn_omega_ == 0.0) {
                     RCLCPP_INFO(get_logger(), "enter mode: turn , omega = %lf", omega);
@@ -327,8 +329,6 @@ private:
                 omega = 0.0;
                 // 左投掷
 
-                gait_.set_period(0.9);
-
                 if (last_thrower_controller_ != 1) {
                     RCLCPP_INFO(get_logger(), "enter mode: thrower , throw left");
                 }
@@ -338,8 +338,6 @@ private:
                 omega = 0.0;
                 // 右投掷
 
-                gait_.set_period(0.9);
-
                 if (last_thrower_controller_ != 2) {
                     RCLCPP_INFO(get_logger(), "enter mode: thrower , throw right");
                 }
@@ -348,25 +346,26 @@ private:
                 action_.update(imu_yaw_, pitch_filt_, vx, omega);
                 // 走完一圈后进集散中心的模式，ctrl加左键点update可以进去那个文件，找到对应的参数然后去调
 
-                gait_.set_period(0.9);
-
                 if (!last_place_controller_) {
                     RCLCPP_INFO(get_logger(), "enter mode: place");
                 }
-            } else if (climb_controller_ || controll_flag) {
-                action_.start_climb(imu_yaw_);
-                action_.update(imu_yaw_, pitch_filt_, vx, omega);
-                // 上台阶模式，ctrl加左键点update可以进去那个文件，找到对应的参数然后去调
+            } else if (climb_controller_) {
+                // action_.start_climb(imu_yaw_);
 
-                gait_.set_period(0.9);
+                // action_.update(imu_yaw_, pitch_filt_, vx, omega);
 
-                if (!last_climb_controller_) {
-                    // RCLCPP_INFO(get_logger(), "enter mode: climb");
-                }
+                // // 上台阶模式，ctrl加左键点update可以进去那个文件，找到对应的参数然后去调
+
+                // pitch_lift_gain_ = 0.0;
+                // gait_.set_period(1.0);
+
+                // if (!last_climb_controller_) {
+                //     RCLCPP_INFO(get_logger(), "enter mode: climb");
+                // }
             } else {
                 action_.abort();
                 thrower_controller(false, false);
-                gait_.set_period(0.9);
+
                 // yaw_stabilize(omega);
                 // ⬆️被注释掉的这一句是用来避免行走时转向过大的，如果有转向过大可以试试这个，不过参数需要调
                 // 注意不应该和那些已经用过imu修正的模式叠加
@@ -410,6 +409,7 @@ private:
     static constexpr double dt_ = 0.002;
 
     bool controll_flag{false};
+    bool last_controll_flag;
 
     geometry_msgs::msg::Twist vision_twist_;
     rclcpp::Time last_vision_time_{0, 0, RCL_ROS_TIME};
@@ -441,6 +441,8 @@ private:
     rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr pub_thrower_left_;
     rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr pub_thrower_right_;
     rclcpp::TimerBase::SharedPtr timer_;
+
+    tick::TickTimer climb_watchdog_;
 
     double imu_yaw_ = 0.0;
 
